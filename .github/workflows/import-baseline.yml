@@ -1,0 +1,47 @@
+name: Import exact Ephora baseline
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  import-baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout clean repository
+        uses: actions/checkout@v4
+
+      - name: Import exact source commit
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SOURCE_REPO="https://github.com/yossfu/Ephora-Viewer.git"
+          SOURCE_COMMIT="fd58ca3117371d2f46f8acc04677807bee833cba"
+
+          git clone --quiet "$SOURCE_REPO" /tmp/ephora-source
+          cd /tmp/ephora-source
+          git checkout --quiet "$SOURCE_COMMIT"
+
+          cd "$GITHUB_WORKSPACE"
+
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a /tmp/ephora-source/. .
+
+          rm -rf /tmp/ephora-source
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "Nothing to import."
+            exit 0
+          fi
+
+          git commit -m "Import exact Ephora baseline fd58ca3"
+          git push origin HEAD:main
