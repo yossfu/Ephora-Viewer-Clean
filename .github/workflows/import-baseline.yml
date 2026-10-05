@@ -20,7 +20,7 @@ jobs:
           set -euo pipefail
 
           SOURCE_REPO="https://github.com/yossfu/Ephora-Viewer.git"
-          SOURCE_COMMIT="fd58ca3117371d2f46f8acc04677807bee833cba"
+          SOURCE_COMMIT="e990ac334dad60b91fa9c3d881bc6b081997e5fa"
 
           git clone --quiet "$SOURCE_REPO" /tmp/ephora-source
           cd /tmp/ephora-source
@@ -43,5 +43,5 @@ jobs:
             exit 0
           fi
 
-          git commit -m "Import exact Ephora baseline fd58ca3"
+          git commit -m "Import exact Ephora baseline e990ac3"
           git push origin HEAD:main
