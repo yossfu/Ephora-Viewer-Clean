@@ -389,8 +389,8 @@ class FilamentMaterials(
      */
     private enum class MaterialTier {
         LIT_FULL,
-        UNLIT_UV,
         LIT_MIN,
+        UNLIT_UV,
         UNLIT_MIN
     }
 
@@ -759,7 +759,7 @@ class FilamentMaterials(
 
         /**
          * Fallback lit: conserva el xform TextureEntry (repeat/offset/rotation).
-         * Sin planar ni emissive; el tier UNLIT_UV va antes para conservar planar.
+         * Sin planar ni emissive.
          */
         val FRAGMENT_LIT_MIN = """
             void material(inout MaterialInputs material) {
