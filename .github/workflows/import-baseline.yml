@@ -45,3 +45,5 @@ jobs:
 
           git commit -m "Import exact Ephora baseline e990ac3"
           git push origin HEAD:main
+
+          echo "Baseline import completed. Build workflow will run from the imported source commit."
