@@ -26,9 +26,9 @@ jobs:
           git clone --quiet "$SOURCE_REPO" /tmp/ephora-source
           cd /tmp/ephora-source
           git checkout --quiet "$SOURCE_COMMIT"
+          rm -rf .git
 
           cd "$GITHUB_WORKSPACE"
-
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
           cp -a /tmp/ephora-source/. .
           rm -rf /tmp/ephora-source
