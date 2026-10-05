@@ -389,8 +389,8 @@ class FilamentMaterials(
      */
     private enum class MaterialTier {
         LIT_FULL,
-        LIT_MIN,
         UNLIT_UV,
+        LIT_MIN,
         UNLIT_MIN
     }
 
@@ -512,10 +512,12 @@ class FilamentMaterials(
             .require(MaterialBuilder.VertexAttribute.POSITION)
             .require(MaterialBuilder.VertexAttribute.UV0)
             .uniformParameter(MaterialBuilder.UniformType.FLOAT4, "baseColor")
+        // Every textured tier must preserve TextureEntry repeat, offset and rotation.
+        builder = builder
+            .uniformParameter(MaterialBuilder.UniformType.FLOAT4, "uvTransform")
+            .uniformParameter(MaterialBuilder.UniformType.FLOAT, "uvRotation")
         if (tier == MaterialTier.LIT_FULL || tier == MaterialTier.UNLIT_UV) {
             builder = builder
-                .uniformParameter(MaterialBuilder.UniformType.FLOAT4, "uvTransform")
-                .uniformParameter(MaterialBuilder.UniformType.FLOAT, "uvRotation")
                 .uniformParameter(MaterialBuilder.UniformType.FLOAT, "planarMode")
                 .uniformParameter(MaterialBuilder.UniformType.FLOAT3, "planarBasisU")
                 .uniformParameter(MaterialBuilder.UniformType.FLOAT3, "planarBasisV")
@@ -547,9 +549,9 @@ class FilamentMaterials(
 
     private fun uniformCountOf(tier: MaterialTier): Int = when (tier) {
         MaterialTier.LIT_FULL -> 9
-        MaterialTier.LIT_MIN -> 3
         MaterialTier.UNLIT_UV -> 6
-        MaterialTier.UNLIT_MIN -> 1
+        MaterialTier.LIT_MIN -> 5
+        MaterialTier.UNLIT_MIN -> 3
     }
 
     private fun attributeCountOf(tier: MaterialTier): Int = 2
@@ -622,12 +624,12 @@ class FilamentMaterials(
             "baseColor",
             desc.baseColor[0], desc.baseColor[1], desc.baseColor[2], desc.baseColor[3]
         )
+        instance.setParameter(
+            "uvTransform",
+            desc.uvTransform[0], desc.uvTransform[1], desc.uvTransform[2], desc.uvTransform[3]
+        )
+        instance.setParameter("uvRotation", desc.uvRotation)
         if (tier == MaterialTier.LIT_FULL || tier == MaterialTier.UNLIT_UV) {
-            instance.setParameter(
-                "uvTransform",
-                desc.uvTransform[0], desc.uvTransform[1], desc.uvTransform[2], desc.uvTransform[3]
-            )
-            instance.setParameter("uvRotation", desc.uvRotation)
             instance.setParameter("planarMode", desc.planarMode)
             instance.setParameter(
                 "planarBasisU",
@@ -756,14 +758,20 @@ class FilamentMaterials(
         """
 
         /**
-         * 2.27c: peldano LIT_MIN. LIT texturizado minimo: POSITION+UV0,
-         * baseColor, sampler, metallic/roughness. Sin planar, sin emissive,
-         * sin TANGENTS explicito.
+         * Fallback lit: conserva el xform TextureEntry (repeat/offset/rotation).
+         * Sin planar ni emissive; el tier UNLIT_UV va antes para conservar planar.
          */
         val FRAGMENT_LIT_MIN = """
             void material(inout MaterialInputs material) {
                 prepareMaterial(material);
-                material.baseColor = materialParams.baseColor * texture(materialParams_baseColorMap, getUV0());
+                vec2 st = getUV0() - vec2(0.5);
+                float c = cos(materialParams.uvRotation);
+                float s = sin(materialParams.uvRotation);
+                vec2 rs = vec2(st.x * c + st.y * s, -st.x * s + st.y * c);
+                rs *= materialParams.uvTransform.xy;
+                vec2 sl = rs + materialParams.uvTransform.zw + vec2(0.5);
+                vec2 uv = vec2(sl.x, 1.0 - sl.y);
+                material.baseColor = materialParams.baseColor * texture(materialParams_baseColorMap, uv);
                 material.metallic = materialParams.metallic;
                 material.roughness = materialParams.roughness;
             }
@@ -798,14 +806,20 @@ class FilamentMaterials(
         """
 
         /**
-         * 2.27c: ultimo peldano. UNLIT con textura y tint, UV de la
-         * geometria sin transformar. Compila o el dispositivo no soporta ni
-         * el texturizado basico.
+         * Ultimo peldano: mantiene el xform TextureEntry incluso en el shader minimo.
+         * La proyeccion planar solo esta disponible en los tiers superiores.
          */
         val FRAGMENT_UNLIT_MIN = """
             void material(inout MaterialInputs material) {
                 prepareMaterial(material);
-                material.baseColor = materialParams.baseColor * texture(materialParams_baseColorMap, getUV0());
+                vec2 st = getUV0() - vec2(0.5);
+                float c = cos(materialParams.uvRotation);
+                float s = sin(materialParams.uvRotation);
+                vec2 rs = vec2(st.x * c + st.y * s, -st.x * s + st.y * c);
+                rs *= materialParams.uvTransform.xy;
+                vec2 sl = rs + materialParams.uvTransform.zw + vec2(0.5);
+                vec2 uv = vec2(sl.x, 1.0 - sl.y);
+                material.baseColor = materialParams.baseColor * texture(materialParams_baseColorMap, uv);
             }
         """
 
