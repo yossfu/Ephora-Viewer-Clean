@@ -1,2 +1,0 @@
-Exact baseline import/build trigger: e990ac334dad60b91fa9c3d881bc6b081997e5fa
-Workflow fixed to preserve the destination .git metadata before importing source.

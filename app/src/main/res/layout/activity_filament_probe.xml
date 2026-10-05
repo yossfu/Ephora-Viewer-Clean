@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0B0E13">
+
+    <!-- The whole point: a SurfaceView and nothing else. The triangle is drawn in
+         the middle of it, so the report panel stays out of the way until asked. -->
+    <FrameLayout
+        android:id="@+id/probeViewportCtn"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        android:layout_gravity="top"
+        android:background="#66000000"
+        app:navigationIcon="@drawable/ic_back"
+        app:navigationIconTint="#FFFFFFFF"
+        app:title="@string/probe_title"
+        app:titleTextColor="#FFFFFFFF" />
+
+    <!-- One line that is always on screen: FPS, frames and which object was made.
+         The tall report goes in the scroll view underneath, which the button
+         collapses so the triangle is never hidden while it is being judged. -->
+    <LinearLayout
+        android:id="@+id/reportPanel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="#E6000000"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/probeStatusEl"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:paddingStart="12dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="2dp"
+            android:textColor="#FFFFFFFF"
+            android:textIsSelectable="true"
+            android:textSize="12sp" />
+
+        <!-- Selectable and scrollable: the whole throwable can be copied off the
+             device without adb. Collapsed by default. -->
+        <ScrollView
+            android:id="@+id/probeReportScroll"
+            android:layout_width="match_parent"
+            android:layout_height="320dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/probeInfoEl"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:paddingStart="12dp"
+                android:paddingTop="6dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="8dp"
+                android:textColor="#FFB9F6CA"
+                android:textIsSelectable="true"
+                android:textSize="10sp" />
+        </ScrollView>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingStart="4dp"
+            android:paddingTop="2dp"
+            android:paddingEnd="4dp"
+            android:paddingBottom="6dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/reportBtn"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_margin="3dp"
+                android:layout_weight="1"
+                android:minWidth="0dp"
+                android:text="@string/probe_report_show" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/saveBtn"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_margin="3dp"
+                android:layout_weight="1"
+                android:minWidth="0dp"
+                android:text="@string/probe_save" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/restartBtn"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_margin="3dp"
+                android:layout_weight="1"
+                android:minWidth="0dp"
+                android:text="@string/probe_restart" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

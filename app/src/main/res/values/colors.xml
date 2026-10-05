@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="lumiya_primary">#FF1FA9A0</color>
+    <color name="lumiya_on_primary">#FFFFFFFF</color>
+    <color name="lumiya_accent">#FF6C63FF</color>
+    <color name="ic_launcher_background">#FF0E1116</color>
+</resources>

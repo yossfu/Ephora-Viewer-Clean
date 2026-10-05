@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <uses-feature
+        android:glEsVersion="0x00030000"
+        android:required="true" />
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
+
+    <application
+        android:name=".EphoraApp"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
+        android:theme="@style/Theme.Ephora">
+
+        <activity
+            android:name=".ui.login.LoginActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".ui.main.MainActivity"
+            android:exported="false" />
+        <activity
+            android:name=".ui.chat.ChatNewActivity"
+            android:exported="false"
+            android:label="@string/chat_title"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".ui.inventory.InventoryActivity"
+            android:exported="false"
+            android:label="@string/inventory_title" />
+        <activity
+            android:name=".ui.world.MovementActivity"
+            android:exported="false"
+            android:label="@string/movement_title" />
+        <activity
+            android:name=".ui.world.WorldViewActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:label="@string/world_title" />
+        <activity
+            android:name=".ui.world.RenderTestActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:label="@string/render_test_title" />
+        <!-- The isolated Filament probe: no Second Life at all. Also launchable
+             from a PC with:
+               adb shell am start -n com.ephora.viewer/com.lumiyaviewer.lumiya.ui.diag.FilamentProbeActivity -->
+        <activity
+            android:name=".ui.diag.FilamentProbeActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode"
+            android:exported="true"
+            android:label="@string/probe_title" />
+        <activity
+            android:name=".ui.settings.SettingsActivity"
+            android:exported="false"
+            android:label="@string/settings_title" />
+        <activity
+            android:name=".ui.diagnostics.DiagnosticsActivity"
+            android:exported="false"
+            android:label="@string/diagnostics_title" />
+
+        <service
+            android:name=".ui.service.ViewerSessionService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="false" />
+    </application>
+</manifest>
