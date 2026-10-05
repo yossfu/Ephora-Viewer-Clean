@@ -27,6 +27,8 @@ jobs:
           cd /tmp/ephora-source
           git checkout --quiet "$SOURCE_COMMIT"
           rm -rf .git
+          # Clean's Actions token cannot replace workflows; this repo keeps its own importer.
+          rm -rf .github
 
           cd "$GITHUB_WORKSPACE"
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
