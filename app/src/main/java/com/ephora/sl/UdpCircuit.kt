@@ -425,6 +425,9 @@ object UdpCircuit {
         var rxN = 0
         var acks = 0
         var gotHs = false
+        var gotMv = false
+        var thrHs = false
+        var thrHsHex = "-"
         var gotName = "ACK-solo"
         var replied = false
         var complete = false
@@ -455,6 +458,7 @@ object UdpCircuit {
                 gotHs = true; gotName = "RegionHandshake"
                 try { decode(p.data, p.length)?.let { TerrainComposition.accept(it.payload) } } catch(_: Throwable) {}
               }
+              if (rx.msgId == 0xFFFF00FA.toInt()) gotMv = true
             } catch(e: java.net.SocketTimeoutException) { break }
           }
         }
@@ -481,8 +485,10 @@ object UdpCircuit {
             det.append(txHex("RegionHandshakeReply", lastSeq(), hr) + " | ")
           } catch(_: Throwable) {}
           drain(3000, "post")
+          try { val th = agentThrottle(s.agentId, s.sessionId, s.circuitCode); send(th); thrHs = true; thrHsHex = txHex("AgentThrottle-entrada-hs", lastSeq(), th) } catch(_: Throwable) {}
+          try { det.append(thrHsHex + " preset=500 total=512000Bps | ") } catch(_: Throwable) {}
         }
-        "UDP dest=" + dest + " tx=" + txN + " rx=" + rxN + " handshake=" + (if (gotHs) "si" else "no") + " msg=" + gotName + " reply=" + (if (replied) "si" else "no") + " complete=" + (if (complete) "si" else "no") + " acks=" + acks + " circuit_fin=" + cfin + " hex=" + lastHex + " [" + det.toString().take(1400) + "]"
+        "UDP dest=" + dest + " tx=" + txN + " rx=" + rxN + " handshake=" + (if (gotHs) "si" else "no") + " msg=" + gotName + " reply=" + (if (replied) "si" else "no") + " complete=" + (if (complete) "si" else "no") + " mv=" + (if (gotMv) "si" else "no") + " thrhs=" + (if (thrHs) "si" else "no") + " acks=" + acks + " circuit_fin=" + cfin + " hex=" + lastHex + " [" + det.toString().take(1400) + "]"
       } finally { try { sock.soTimeout = 15 } catch(_: Throwable) {} }
     } catch(e: Throwable) { "UDP dest=" + dest + " circuit_fin=" + cfin + " FAIL " + LoginManager.errText(e, "").take(400) }
   }
