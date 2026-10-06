@@ -57,8 +57,11 @@ object PrimDecoder {
     try { while (evictSample.size > 8) evictSample.removeFirst() } catch(_: Throwable) {}
   }
   private fun noteKill(id: Long) {
-    try { val rk = synchronized(recs) { recs[id] } ?: return } catch(_: Throwable) { return }
-    try { killSample.addLast(id.toString() + " " + "%.0f,%.0f,%.0f".format(rk.x, rk.y, rk.z)) } catch(_: Throwable) {}
+    var rk: Prim? = null
+    try { rk = synchronized(recs) { recs[id] } } catch(_: Throwable) {}
+    val r = rk
+    try { if (r == null) return } catch(_: Throwable) { return }
+    try { killSample.addLast(id.toString() + " " + "%.0f,%.0f,%.0f".format(r.x, r.y, r.z)) } catch(_: Throwable) {}
     try { while (killSample.size > 8) killSample.removeFirst() } catch(_: Throwable) {}
   }
   private fun updatePubDiff(pub: List<Prim>) {
