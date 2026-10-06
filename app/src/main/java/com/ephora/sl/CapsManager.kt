@@ -169,11 +169,21 @@ object CapsManager {
         lastEqUrl = caps["EventQueueGet"] ?: ""
         try { viewerAssetUrl = caps["ViewerAsset"] ?: "" } catch(_: Throwable) {}
         try {
-          meshUrl = metadataUrl(txt, "GetMesh2")
-          meshUrlState = if (meshUrl.isNotBlank()) "GetMesh2" else ""
+          // Seed caps expose service URLs as top-level entries. Metadata only carries
+          // per-cap settings such as throttle/use-ssl, so consult it only as fallback.
+          meshUrl = caps["GetMesh2"]?.trim()?.takeIf { it.startsWith("http") } ?: ""
+          meshUrlState = if (meshUrl.isNotBlank()) "GetMesh2-direct" else ""
+          if (meshUrl.isBlank()) {
+            meshUrl = caps["GetMesh"]?.trim()?.takeIf { it.startsWith("http") } ?: ""
+            meshUrlState = if (meshUrl.isNotBlank()) "GetMesh-direct" else ""
+          }
+          if (meshUrl.isBlank()) {
+            meshUrl = metadataUrl(txt, "GetMesh2")
+            meshUrlState = if (meshUrl.isNotBlank()) "GetMesh2-metadata" else ""
+          }
           if (meshUrl.isBlank()) {
             meshUrl = metadataUrl(txt, "GetMesh")
-            meshUrlState = if (meshUrl.isNotBlank()) "GetMesh" else "no:$metadataReadState"
+            meshUrlState = if (meshUrl.isNotBlank()) "GetMesh-metadata" else "no:$metadataReadState"
           }
         } catch(_: Throwable) { meshUrl = ""; meshUrlState = "error" }
         val hasEq = if (lastEqUrl.isNotBlank()) "si" else "no"
