@@ -125,13 +125,13 @@ class MainActivity : ComponentActivity() {
         val edad = ((if (mundoT0 > 0L) ((System.currentTimeMillis() - mundoT0) / 1000L).toString() else "?"))
         val txt = try { lastUdp.takeLast(12000) } catch(_: Throwable) { "" }
         val sum = try { txt.lines().take(3).joinToString("\n")} catch(_: Throwable) { "" }
-        StreamBridge.Snap("7.54", try { phase.text.toString() } catch(_: Throwable) { "?" }, edad, txt, sum)
+        StreamBridge.Snap("7.55", try { phase.text.toString() } catch(_: Throwable) { "?" }, edad, txt, sum)
       } catch(_: Throwable) { null }
     }
     fun bootSnap(): StreamBridge.Snap? {
       return try {
-        val txt = try { "EPHORA arranque app=7.54 ndk=" + NdkCore.helloSafe() + " device=" + Build.MANUFACTURER + " " + Build.MODEL + " sdk=" + Build.VERSION.SDK_INT + " grid=" + lastGrid } catch(_: Throwable) { "EPHORA arranque" }
-        StreamBridge.Snap("7.54", "arranque", "?", txt, txt)
+        val txt = try { "EPHORA arranque app=7.55 ndk=" + NdkCore.helloSafe() + " device=" + Build.MANUFACTURER + " " + Build.MODEL + " sdk=" + Build.VERSION.SDK_INT + " grid=" + lastGrid } catch(_: Throwable) { "EPHORA arranque" }
+        StreamBridge.Snap("7.55", "arranque", "?", txt, txt)
       } catch(_: Throwable) { null }
     }
     fun snapOrBoot(): StreamBridge.Snap? {
@@ -294,7 +294,7 @@ class MainActivity : ComponentActivity() {
     }
     fun buildReport(): String {
       val df = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US)
-      return "EPHORA DEBUG "+df.format(Date())+"\napp=7.54\nndk="+NdkCore.helloSafe()+"\ndevice="+Build.MANUFACTURER+" "+Build.MODEL+" sdk="+Build.VERSION.SDK_INT+"\ngrid="+lastGrid+"\nuser="+lastUser.replace("\"","")+"\nstart="+lastStart+"\nsesion="+sesionFlag+" circuitoEdadS="+((if (mundoT0 > 0L) ((System.currentTimeMillis() - mundoT0) / 1000L).toString() else "?"))+"\nfase="+phase.text+"\n---login---\n"+lastOut+"\n---caps---\n"+lastCaps+"\n---udp---\n"+lastUdp+"\nCHAT-RX-ESTADO n="+ChatManager.rxCount+"\nIM-RX-ESTADO n="+ChatManager.imRxCount+"\n---chat---\n"+chatRing.joinToString("\n")+"\nACK-COUNT n="+ChatManager.ackTxTotal+" rxmsg="+ChatManager.ackTotal+"\n"+AgentLoop.nearLine+"\nORACULO "+AgentLoop.sintLine+" | "+AgentLoop.destLine+"\nPING-ESTADO tx="+AgentLoop.pingTx+" ultimo="+AgentLoop.lastPingId+"\\n"+ImageAssets.status()+"\\nLOGIN-UI tarjeta userFull="+vis(userFull)+" pw="+vis(pw)+" btnEnter="+vis(btnEnter)+" loginView="+vis(loginView)+" mundo="+vis(mundo)+"\n"+UdpCircuit.rxCountLine()+"STREAM streamDev="+streamDevId+" "+StreamBridge.lastState+"\n---gfx---\n"+(try { renderer3d?.gfxLine() ?: (if (gfxExitLatch != "?") "3D-cerrado " + gfxExitLatch else if (gfxOpenLatch != "?") "3D-cerrado " + gfxOpenLatch else "3D-cerrado") } catch(_: Throwable) { "GFX-DIAG error" })+"\nTERRA nPk="+TerrainMesh.nPk+" patches="+TerrainMesh.patchesGot()+"/256 "+TerrainMesh.coverageStatus()+" min="+TerrainMesh.minH+" max="+TerrainMesh.maxH+"\n"+PrimDecoder.meshStatus()+"\nPRIMS-DEC terse="+PrimDecoder.nTerse+"/"+PrimDecoder.nObjTerse+" comp="+PrimDecoder.nComp+"/"+PrimDecoder.nObjComp+" full="+PrimDecoder.nFull+"/"+PrimDecoder.nObjFull+" cached="+PrimDecoder.nCached+" kill="+PrimDecoder.nKill+"\n"+PrimDecoder.estadoFijo()+"\n"+AgentLoop.descTop()+"\n"+AgentLoop.imgPendiente()+"\n"+AgentLoop.terrenoPend()+"\n"+ImageAssets.pendingTop()+"\n"+PrimDecoder.pubLine()+"\n"+PrimDecoder.censoLine()+"\n"+PrimDecoder.tiposLine()+"\n---fin---"
+      return "EPHORA DEBUG "+df.format(Date())+"\napp=7.55\nndk="+NdkCore.helloSafe()+"\ndevice="+Build.MANUFACTURER+" "+Build.MODEL+" sdk="+Build.VERSION.SDK_INT+"\ngrid="+lastGrid+"\nuser="+lastUser.replace("\"","")+"\nstart="+lastStart+"\nsesion="+sesionFlag+" circuitoEdadS="+((if (mundoT0 > 0L) ((System.currentTimeMillis() - mundoT0) / 1000L).toString() else "?"))+"\nfase="+phase.text+"\n---login---\n"+lastOut+"\n---caps---\n"+lastCaps+"\n---udp---\n"+lastUdp+"\nCHAT-RX-ESTADO n="+ChatManager.rxCount+"\nIM-RX-ESTADO n="+ChatManager.imRxCount+"\n---chat---\n"+chatRing.joinToString("\n")+"\nACK-COUNT n="+ChatManager.ackTxTotal+" rxmsg="+ChatManager.ackTotal+"\n"+AgentLoop.nearLine+"\nORACULO "+AgentLoop.sintLine+" | "+AgentLoop.destLine+"\nPING-ESTADO tx="+AgentLoop.pingTx+" ultimo="+AgentLoop.lastPingId+"\\n"+ImageAssets.status()+"\\nLOGIN-UI tarjeta userFull="+vis(userFull)+" pw="+vis(pw)+" btnEnter="+vis(btnEnter)+" loginView="+vis(loginView)+" mundo="+vis(mundo)+"\n"+UdpCircuit.rxCountLine()+"STREAM streamDev="+streamDevId+" "+StreamBridge.lastState+"\n---gfx---\n"+(try { renderer3d?.gfxLine() ?: (if (gfxExitLatch != "?") "3D-cerrado " + gfxExitLatch else if (gfxOpenLatch != "?") "3D-cerrado " + gfxOpenLatch else "3D-cerrado") } catch(_: Throwable) { "GFX-DIAG error" })+"\nTERRA nPk="+TerrainMesh.nPk+" patches="+TerrainMesh.patchesGot()+"/256 "+TerrainMesh.coverageStatus()+" min="+TerrainMesh.minH+" max="+TerrainMesh.maxH+"\n"+PrimDecoder.meshStatus()+"\nPRIMS-DEC terse="+PrimDecoder.nTerse+"/"+PrimDecoder.nObjTerse+" comp="+PrimDecoder.nComp+"/"+PrimDecoder.nObjComp+" full="+PrimDecoder.nFull+"/"+PrimDecoder.nObjFull+" cached="+PrimDecoder.nCached+" kill="+PrimDecoder.nKill+"\n"+PrimDecoder.estadoFijo()+"\n"+AgentLoop.descTop()+"\n"+AgentLoop.imgPendiente()+"\n"+AgentLoop.terrenoPend()+"\n"+ImageAssets.pendingTop()+"\n"+PrimDecoder.pubLine()+"\n"+PrimDecoder.censoLine()+"\n"+PrimDecoder.tiposLine()+"\n---fin---"
     }
     fun snapSession(): StreamBridge.SessionSnap? {
       return try {
@@ -302,7 +302,7 @@ class MainActivity : ComponentActivity() {
         if (s.agentId.isBlank()) return null
         val req = try { Regex("reqId=(\\S+)").findAll(lastOut).lastOrNull()?.groupValues?.getOrNull(1) ?: "?" } catch(_: Throwable) { "?" }
         val head = try { buildReport().lines().take(40).joinToString(" | ") } catch(_: Throwable) { "" }
-        StreamBridge.SessionSnap("7.54", req, try { s.agentId.takeLast(4) } catch(_: Throwable) { "?" }, try { s.seedCap.takeLast(4) } catch(_: Throwable) { "?" }, try { CapsManager.capsCount } catch(_: Throwable) { -1 }, try { s.simPort } catch(_: Throwable) { -1 }, head)
+        StreamBridge.SessionSnap("7.55", req, try { s.agentId.takeLast(4) } catch(_: Throwable) { "?" }, try { s.seedCap.takeLast(4) } catch(_: Throwable) { "?" }, try { CapsManager.capsCount } catch(_: Throwable) { -1 }, try { s.simPort } catch(_: Throwable) { -1 }, head)
       } catch(_: Throwable) { null }
     }
 

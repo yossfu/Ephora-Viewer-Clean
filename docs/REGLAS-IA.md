@@ -133,3 +133,5 @@
 # Historial: v7.53 2026-10-06 corrige-escala: los muros de la cabana salian tumbados (lajas beige al ras del suelo) porque las dos ramas no-mesh del renderer escalaban (sx,sy,sz) sobre ejes (x=Este,y=Arriba,z=Norte): el alto SL-Z caia en profundidad y el fondo SL-Y en vertical; la rama mesh ya usaba (sx,sz,sy) y por eso el sofa si se veia bien. Ahora las tres ramas usan (sx,sz,sy); avatar capsula intacto. Bump 7.53/121. Congelados intactos.
 
 # Historial: v7.54 2026-10-06 formas-reales: las cajas sin forma venian de ignorar los 17 params del bloque de 31B (todo era cubo/esfera/cilindro). Ahora parseFull guarda path/profile/hueco/cortes/torsion/taper/shear/revoluciones/etc (quanta oficiales), y PrimShapes.kt barre el perfil por el camino (verificado en harness WebGL: caja/cilindro/prisma/esfera/toro/tubo/anillo + hueco/corte/taper/torsion/dimple/costilla/shear). Una sentencia por linea; bumps 7.54/122; congelados intactos.
+
+# Historial: v7.55 2026-10-06 compila-fix: el 7.54 no compilaba (Params/quantize sin pathTaperX/Y + llamada con 16 args). Se anaden los dos campos y el arg. Sin cambios de conducta. Bumps 7.55/123.

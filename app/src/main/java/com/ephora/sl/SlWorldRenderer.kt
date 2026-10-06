@@ -281,7 +281,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
         val mesh = if (isSphere) sphere else if (isCylinder) cylinder else cube
         val vertexCount = if (isSphere) SPHERE_VERTS else if (isCylinder) CYLINDER_VERTS else CUBE_VERTS
         val meshGeometry = if (!isAvatar && o.meshId.isNotEmpty()) MeshAssets.mesh(o.meshId) else null
-        val shaped = if (!isAvatar && o.hasShape) PrimShapes.obtain(PrimShapes.quantize(o.pathCurve, o.profileCurve, o.shPb, o.shPe, o.shPsx, o.shPsy, o.shShx, o.shShy, o.shTw, o.shTwb, o.shRo, o.shRev, o.shSk, o.shQb, o.shQe, o.shQh)) else null
+        val shaped = if (!isAvatar && o.hasShape) PrimShapes.obtain(PrimShapes.quantize(o.pathCurve, o.profileCurve, o.shPb, o.shPe, o.shPsx, o.shPsy, o.shShx, o.shShy, o.shTw, o.shTwb, o.shRo, o.shTpx, o.shTpy, o.shRev, o.shSk, o.shQb, o.shQe, o.shQh)) else null
         if (!isAvatar && o.meshId.isNotEmpty()) meshReferences++
         if (meshGeometry != null) {
           meshObjects++

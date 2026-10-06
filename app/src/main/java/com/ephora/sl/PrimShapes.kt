@@ -17,7 +17,7 @@ import kotlin.math.sqrt
 // - LSL wiki PRIM_TYPE: que params usa cada tipo (cut/twist/taper/shear/hole_size/...).
 // - LibreMetaverse Primitive.cs quanta: CUT/HOLLOW 0.00002, SCALE/SHEAR/TAPER 0.01, REV 0.015.
 object PrimShapes {
-  data class Params(val path: Int, val prof: Int, val hole: Int, val pathBegin: Float, val pathEnd: Float, val pathScaleX: Float, val pathScaleY: Float, val pathShearX: Float, val pathShearY: Float, val pathTwist: Float, val pathTwistBegin: Float, val pathRadiusOffset: Float, val pathRevolutions: Float, val pathSkew: Float, val profileBegin: Float, val profileEnd: Float, val profileHollow: Float)
+  data class Params(val path: Int, val prof: Int, val hole: Int, val pathBegin: Float, val pathEnd: Float, val pathScaleX: Float, val pathScaleY: Float, val pathShearX: Float, val pathShearY: Float, val pathTwist: Float, val pathTwistBegin: Float, val pathRadiusOffset: Float, val pathTaperX: Float, val pathTaperY: Float, val pathRevolutions: Float, val pathSkew: Float, val profileBegin: Float, val profileEnd: Float, val profileHollow: Float)
   data class Mesh(val buf: java.nio.FloatBuffer, val count: Int)
   private data class Key(val p: Params)
   private val cache = object : LinkedHashMap<Key, Mesh>(64, 0.75f, true) {
@@ -31,13 +31,13 @@ object PrimShapes {
   fun status(): String {
     return "SHAPES built=" + nBuilt + " hits=" + nCacheHit + " cached=" + cache.size
   }
-  fun quantize(path: Int, profCurve: Int, pb: Float, pe: Float, psx: Float, psy: Float, shx: Float, shy: Float, tw: Float, twb: Float, ro: Float, rev: Float, sk: Float, qb: Float, qe: Float, qh: Float): Params {
+  fun quantize(path: Int, profCurve: Int, pb: Float, pe: Float, psx: Float, psy: Float, shx: Float, shy: Float, tw: Float, twb: Float, ro: Float, tpx: Float, tpy: Float, rev: Float, sk: Float, qb: Float, qe: Float, qh: Float): Params {
     val prof = profCurve and 0x0F
     val hole = profCurve and 0xF0
     fun q(v: Float): Float {
       return (v * 100f).toInt() / 100f
     }
-    return Params(path and 0xF0, prof, hole, q(pb.coerceIn(0f, 1f)), q(pe.coerceIn(0f, 1f)), q(psx.coerceIn(0f, 2f)), q(psy.coerceIn(0f, 2f)), q(shx), q(shy), q(tw), q(twb), q(ro), q(rev), q(sk), q(qb.coerceIn(0f, 1f)), q(qe.coerceIn(0f, 1f)), q(qh.coerceIn(0f, 1f)))
+    return Params(path and 0xF0, prof, hole, q(pb.coerceIn(0f, 1f)), q(pe.coerceIn(0f, 1f)), q(psx.coerceIn(0f, 2f)), q(psy.coerceIn(0f, 2f)), q(shx), q(shy), q(tw), q(twb), q(ro), q(tpx), q(tpy), q(rev), q(sk), q(qb.coerceIn(0f, 1f)), q(qe.coerceIn(0f, 1f)), q(qh.coerceIn(0f, 1f)))
   }
   fun obtain(k: Params): Mesh? {
     try {
