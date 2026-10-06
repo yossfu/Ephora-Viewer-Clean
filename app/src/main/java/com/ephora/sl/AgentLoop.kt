@@ -187,6 +187,24 @@ object AgentLoop {
   val imgReqTime = LinkedHashMap<String,Long>()
   val imgReqTry = LinkedHashMap<String,Int>()
   val imgDataOk = LinkedHashSet<String>()
+  val imgSeen = LinkedHashSet<String>()
+  fun imgLista(u: String): Boolean {
+    try { if (imgDataOk.contains(u.take(8))) return true } catch (_: Throwable) {}
+    try { if (ImageAssets.has(u)) return true } catch (_: Throwable) {}
+    return false
+  }
+  fun notaImgAsm(asm: String) {
+    try { if (asm.startsWith("TEX-UDP-ENSAMBLADA")) imgDataOk.add(asm.substringAfter("id=").take(8).lowercase()) } catch (_: Throwable) {}
+    try { onTick?.invoke(asm) } catch (_: Throwable) {}
+  }
+  fun terrenoPend(): String {
+    try {
+      val ids = TerrainComposition.textureIds().take(4)
+      if (ids.isEmpty()) return "TERRAIN-PEND sin-ids"
+      val parts = ids.map { u -> u.take(8) + "=" + (if (ImageAssets.has(u)) "bitmap" else if (imgDataOk.contains(u.take(8))) "ensamblada" else if (imgReqSent.contains(u)) "pedida-r" + (imgReqTry[u] ?: 1) else "nada") }
+      return "TERRAIN-PEND base=" + TerrainComposition.baseTexture().take(8) + " " + parts.joinToString(" ")
+    } catch (_: Throwable) { return "TERRAIN-PEND error" }
+  }
   val imgHexDone = LinkedHashSet<String>()
   var loopT0 = 0L
   val imgUnrelSent = LinkedHashSet<String>()
@@ -259,6 +277,7 @@ object AgentLoop {
         try { onTick?.invoke("IMAGE-REQ sin-uuid") } catch(_: Throwable) {}
         return false
       }
+      try { ImageAssets.touchIds(uuids.take(96)) } catch(_: Throwable) {}
       var n = 0
       var cupo = 24
       for (u in uuids) {
@@ -267,7 +286,7 @@ object AgentLoop {
           try {
             val last = imgReqTime[u] ?: 0L
             val tries = imgReqTry[u] ?: 1
-            if (tries < 3 && !imgDataOk.contains(u.take(8)) && System.currentTimeMillis() - last > 20000L) {
+            if (tries < 3 && !imgLista(u) && System.currentTimeMillis() - last > 20000L) {
               val b2 = UdpCircuit.requestImage(s.agentId, s.sessionId, u)
               val seq2 = try { ByteBuffer.wrap(b2, 1, 4).order(ByteOrder.BIG_ENDIAN).int.toLong() and 0xFFFFFFFFL } catch(_: Throwable) { UdpCircuit.lastSeq() }
               try {
@@ -478,11 +497,13 @@ object AgentLoop {
       val uuids = try { (TerrainComposition.textureIds() + PrimDecoder.texList()).distinct() } catch(_: Throwable) { emptyList<String>() }
       var pedidas = 0
       var ok = 0
+      var vistas = 0
       for (u in uuids) {
         try { if (imgReqSent.contains(u)) pedidas++ } catch(_: Throwable) {}
-        try { if (imgDataOk.contains(u.take(8))) ok++ } catch(_: Throwable) {}
+        try { if (imgLista(u)) ok++ } catch(_: Throwable) {}
+        try { if (imgSeen.contains(u.take(8))) vistas++ } catch(_: Throwable) {}
       }
-      return "IMAGE-REQ-PEND total=" + uuids.size + " pedidas=" + pedidas + " ok=" + ok + " pendiente=" + (uuids.size - pedidas)
+      return "IMAGE-REQ-PEND total=" + uuids.size + " pedidas=" + pedidas + " ok=" + ok + " vistas=" + vistas + " pendiente=" + (uuids.size - pedidas)
     } catch(_: Throwable) { return "IMAGE-REQ-PEND error" }
   }
   fun status(): String = "AU tx=" + tx + (if (running) " vivo" else " parado") + (if (lastTick.isNotBlank()) " " + lastTick else "")
@@ -558,11 +579,12 @@ object AgentLoop {
           val d = UdpCircuit.decode(buf, len)
           if (d != null) {
             val imgMid = if (mid == 0xFFFF0056.toInt()) 86 else mid
-            try { ImageAssets.accept(imgMid, d.payload)?.let { onTick?.invoke(it) } } catch(_: Throwable) {}
+            try { ImageAssets.accept(imgMid, d.payload)?.let { asm -> notaImgAsm(asm) } } catch(_: Throwable) {}
             try {
               val line = UdpCircuit.parseImage(imgMid, d.payload)
               if (line != null) {
-                try { if (line.startsWith("IMAGE-DATA")) imgDataOk.add(line.substringAfter("id=").take(8).lowercase()) } catch(_: Throwable) {}
+                try { if (line.startsWith("IMAGE-DATA")) imgSeen.add(line.substringAfter("id=").take(8).lowercase()) } catch(_: Throwable) {}
+                try { if (line.startsWith("IMAGE-DATA") && line.contains("completo=si")) imgDataOk.add(line.substringAfter("id=").take(8).lowercase()) } catch(_: Throwable) {}
                 try { onTick?.invoke(line) } catch(_: Throwable) {}
               }
             } catch(_: Throwable) {}
@@ -602,6 +624,7 @@ object AgentLoop {
     try { imgReqTime.clear() } catch(_: Throwable) {}
     try { imgReqTry.clear() } catch(_: Throwable) {}
     try { imgDataOk.clear() } catch(_: Throwable) {}
+    try { imgSeen.clear() } catch(_: Throwable) {}
     try { imgHexDone.clear() } catch(_: Throwable) {}
     try { sintDone = false } catch(_: Throwable) {}
     try { imgCtrlDone = false } catch(_: Throwable) {}
@@ -739,7 +762,8 @@ object AgentLoop {
             try {
               if (loopSock != null && loopAddr != null) {
                 val nowR = System.currentTimeMillis()
-                val go = try { PrimDecoder.texList().any { lane -> !imgReqSent.contains(lane) || ((imgReqTry[lane] ?: 1) < 3 && !imgDataOk.contains(lane.take(8)) && nowR - (imgReqTime[lane] ?: 0L) > 20000L) } } catch(_: Throwable) { false }
+                val go = try { (TerrainComposition.textureIds() + PrimDecoder.texList()).distinct().any { lane -> !imgReqSent.contains(lane) || ((imgReqTry[lane] ?: 1) < 3 && !imgLista(lane) && nowR - (imgReqTime[lane] ?: 0L) > 20000L) } } catch(_: Throwable) { false }
+                try { ImageAssets.touchIds((TerrainComposition.textureIds() + PrimDecoder.texList()).distinct().take(96)) } catch(_: Throwable) {}
                 if (go) sendImageReqBody("tick")
                 try {
                   if (imgRxCount == 0L && System.currentTimeMillis() - loopT0 > 90000L) {

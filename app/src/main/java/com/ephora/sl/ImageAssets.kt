@@ -17,7 +17,7 @@ object ImageAssets {
   private const val J2C_IMAGE_CODEC = 2
   private const val MAX_COMPRESSED = 16 * 1024 * 1024
   private const val MAX_BITMAPS = 48
-  private const val MAX_PENDING = 32
+  private const val MAX_PENDING = 96
   private data class Pending(var expected: Int = 0, var codec: Int = 0, val parts: TreeMap<Int, ByteArray> = TreeMap(), var touched: Long = 0L, var queued: Boolean = false) {
     fun byteCount(): Int = parts.values.sumOf { it.size }
   }
@@ -145,6 +145,17 @@ object ImageAssets {
   }
 
   @Synchronized fun bitmap(uuid: String): Bitmap? = bitmaps[uuid.lowercase()]
+  @Synchronized fun has(uuid: String): Boolean = bitmaps.containsKey(uuid.lowercase())
+  @Synchronized fun pendingTop(): String {
+    val ids = pending.keys.map { it.take(8) }.take(12)
+    return "IMAGE-PEND-DET n=" + pending.size + " ids=" + (if (ids.isEmpty()) "-" else ids.joinToString(","))
+  }
+  @Synchronized fun touchIds(ids: List<String>) {
+    val now = System.currentTimeMillis()
+    for (u in ids) {
+      try { pending[u]?.touched = now } catch (_: Throwable) {}
+    }
+  }
   @Synchronized fun status(): String = "TEX-ASSETS packets=$packetCount complete=$completeCount decoded=$decodedCount failed=$failedCount cache=${bitmaps.size} pending=${pending.size} last=$lastResult"
 
   private fun uuidAt(b: ByteArray): String? {
