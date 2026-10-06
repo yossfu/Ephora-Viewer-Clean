@@ -7,6 +7,8 @@ object CapsManager {
   var capsCount = 0
   @Volatile var viewerAssetUrl = ""
   @Volatile var meshUrl = ""
+  @Volatile var meshUrlState = "sin-leer"
+  @Volatile private var metadataReadState = "sin-leer"
   var seedHost = ""
   var lastEqUrl = ""
   var rawHasEQ = false
@@ -68,31 +70,81 @@ object CapsManager {
   }
   private fun metadataUrl(txt: String, capName: String): String {
     try {
-      val metadata = txt.indexOf("<key>Metadata</key>")
-      if (metadata < 0) return ""
-      val key = txt.indexOf("<key>$capName</key>", metadata)
-      if (key < 0) return ""
-      val mapStart = txt.indexOf("<map>", key)
-      val mapEnd = if (mapStart >= 0) txt.indexOf("</map>", mapStart) else -1
-      if (mapStart < 0 || mapEnd < 0) return ""
-      val block = txt.substring(mapStart, mapEnd)
-      val urlKey = block.indexOf("<key>url</key>")
-      if (urlKey < 0) return ""
-      val stringAt = block.indexOf("<string>", urlKey)
-      val uriAt = block.indexOf("<uri>", urlKey)
-      val at = when {
-        stringAt < 0 -> uriAt
-        uriAt < 0 -> stringAt
-        else -> minOf(stringAt, uriAt)
+      val parser = android.util.Xml.newPullParser()
+      parser.setFeature(org.xmlpull.v1.XmlPullParser.FEATURE_PROCESS_DOCDECL, false)
+      parser.setInput(java.io.StringReader(txt))
+      var event = parser.eventType
+      while (event != org.xmlpull.v1.XmlPullParser.START_TAG && event != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) event = parser.next()
+      if (event != org.xmlpull.v1.XmlPullParser.START_TAG || parser.name != "llsd") {
+        metadataReadState = "raiz-llsd-no-encontrada"
+        return ""
       }
-      if (at < 0) return ""
-      val tag = if (at == uriAt) "uri" else "string"
-      val end = block.indexOf("</$tag>", at)
-      if (end < 0) return ""
-      return block.substring(at + tag.length + 2, end).trim().takeIf { it.startsWith("http") } ?: ""
-    } catch (_: Throwable) { return "" }
+      if (parser.nextTag() != org.xmlpull.v1.XmlPullParser.START_TAG) {
+        metadataReadState = "valor-raiz-vacio"
+        return ""
+      }
+      val root = readLlsdValue(parser, 0, intArrayOf(0)) as? Map<*, *>
+      val metadata = root?.get("Metadata") as? Map<*, *>
+      val cap = metadata?.get(capName) as? Map<*, *>
+      val value = (cap?.get("url") as? String)?.trim().orEmpty()
+      metadataReadState = when {
+        metadata == null -> "sin-metadata"
+        cap == null -> "sin-$capName"
+        value.isBlank() -> "$capName-sin-url"
+        !value.startsWith("http") -> "$capName-url-invalida"
+        else -> "$capName-ok"
+      }
+      return value.takeIf { it.startsWith("http") } ?: ""
+    } catch (e: Throwable) {
+      metadataReadState = "xml-${e.javaClass.simpleName}"
+      return ""
+    }
+  }
+
+  private fun readLlsdValue(parser: org.xmlpull.v1.XmlPullParser, depth: Int, nodes: IntArray): Any? {
+    require(depth < 32 && ++nodes[0] <= 20000) { "llsd-limite" }
+    require(parser.eventType == org.xmlpull.v1.XmlPullParser.START_TAG) { "llsd-valor" }
+    return when (parser.name) {
+      "map" -> {
+        val out = LinkedHashMap<String, Any?>()
+        while (true) {
+          val event = parser.next()
+          if (event == org.xmlpull.v1.XmlPullParser.END_TAG && parser.name == "map") break
+          if (event == org.xmlpull.v1.XmlPullParser.START_TAG) {
+            require(parser.name == "key") { "llsd-map-key" }
+            val key = parser.nextText()
+            require(parser.nextTag() == org.xmlpull.v1.XmlPullParser.START_TAG) { "llsd-map-value" }
+            out[key] = readLlsdValue(parser, depth + 1, nodes)
+          }
+        }
+        out
+      }
+      "array" -> {
+        val out = ArrayList<Any?>()
+        while (true) {
+          val event = parser.next()
+          if (event == org.xmlpull.v1.XmlPullParser.END_TAG && parser.name == "array") break
+          if (event == org.xmlpull.v1.XmlPullParser.START_TAG) out.add(readLlsdValue(parser, depth + 1, nodes))
+          require(out.size <= 20000) { "llsd-array-limite" }
+        }
+        out
+      }
+      else -> {
+        val tag = parser.name
+        val value = parser.nextText().trim()
+        when (tag) {
+          "boolean" -> value == "1" || value.equals("true", ignoreCase = true)
+          "integer", "int" -> value.toLongOrNull() ?: 0L
+          "real" -> value.toDoubleOrNull() ?: 0.0
+          "undef" -> null
+          else -> value
+        }
+      }
+    }
   }
   suspend fun fetchSeed(seedUrl: String): String = withContext(Dispatchers.IO) {
+    meshUrl = ""
+    meshUrlState = "leyendo"
     if (seedUrl.isBlank()) return@withContext "CAPS method=POST code=- seed vacia: haz LOGIN primero"
     seedHost = seedHostOf(seedUrl)
     val tail4 = seedUrl.takeLast(4)
@@ -109,18 +161,25 @@ object CapsManager {
       client.newCall(req).execute().use { resp ->
         val code = resp.code
         val txt = try { resp.body?.string() ?: "" } catch(e: Throwable) { "readErr" }
-        if (code !in 200..299) return@withContext "CAPS method=POST seedHost=" + seedHost + " seedLen=" + seedUrl.length + " seedTieneCap=" + hasCap + " seedTail4=" + tail4 + " reqCaps=" + WANT.size + " reqBodyLen=" + reqBody.length + " reqPreview=" + reqPrev + " code=" + code + " CT=[" + ctSent + "] Accept=[" + acSent + "] respLen=" + txt.length + " respPreview=" + txt.replace("\r", "").replace("\n", " ").take(800)
+        if (code !in 200..299) { meshUrlState = "caps-http-$code"; return@withContext "CAPS method=POST seedHost=" + seedHost + " seedLen=" + seedUrl.length + " seedTieneCap=" + hasCap + " seedTail4=" + tail4 + " reqCaps=" + WANT.size + " reqBodyLen=" + reqBody.length + " reqPreview=" + reqPrev + " code=" + code + " CT=[" + ctSent + "] Accept=[" + acSent + "] respLen=" + txt.length + " respPreview=" + txt.replace("\r", "").replace("\n", " ").take(800) }
         rawHasEQ = txt.contains("EventQueueGet")
         lastKeys = allKeys(txt, 20)
         caps = parseSeedMap(txt)
         capsCount = caps.size
         lastEqUrl = caps["EventQueueGet"] ?: ""
         try { viewerAssetUrl = caps["ViewerAsset"] ?: "" } catch(_: Throwable) {}
-        try { meshUrl = metadataUrl(txt, "GetMesh2").ifBlank { metadataUrl(txt, "GetMesh") } } catch(_: Throwable) { meshUrl = "" }
+        try {
+          meshUrl = metadataUrl(txt, "GetMesh2")
+          meshUrlState = if (meshUrl.isNotBlank()) "GetMesh2" else ""
+          if (meshUrl.isBlank()) {
+            meshUrl = metadataUrl(txt, "GetMesh")
+            meshUrlState = if (meshUrl.isNotBlank()) "GetMesh" else "no:$metadataReadState"
+          }
+        } catch(_: Throwable) { meshUrl = ""; meshUrlState = "error" }
         val hasEq = if (lastEqUrl.isNotBlank()) "si" else "no"
         val meta = metaSubKeys(txt)
-        "CAPS method=POST seedHost=" + seedHost + " seedLen=" + seedUrl.length + " seedTieneCap=" + hasCap + " seedTail4=" + tail4 + " reqCaps=" + WANT.size + " reqBodyLen=" + reqBody.length + " reqPreview=" + reqPrev + " code=200 respLen=" + txt.length + " respPreview=" + txt.replace("\r", "").replace("\n", " ").take(800) + " keys=" + lastKeys.joinToString(",") + " rawTieneEQ=" + (if (rawHasEQ) "si" else "no") + " tieneEventQueueGet=" + hasEq + " capsCount=" + capsCount + " metaKeys=" + meta.joinToString(",") + " meshCap=" + (if (meshUrl.isBlank()) "no" else "si")
+        "CAPS method=POST seedHost=" + seedHost + " seedLen=" + seedUrl.length + " seedTieneCap=" + hasCap + " seedTail4=" + tail4 + " reqCaps=" + WANT.size + " reqBodyLen=" + reqBody.length + " reqPreview=" + reqPrev + " code=200 respLen=" + txt.length + " respPreview=" + txt.replace("\r", "").replace("\n", " ").take(800) + " keys=" + lastKeys.joinToString(",") + " rawTieneEQ=" + (if (rawHasEQ) "si" else "no") + " tieneEventQueueGet=" + hasEq + " capsCount=" + capsCount + " metaKeys=" + meta.joinToString(",") + " meshCap=" + meshUrlState
       }
-    } catch(e: Throwable) { "CAPS method=POST seedHost=" + seedHost + " seedLen=" + seedUrl.length + " FAIL " + LoginManager.errText(e, "").take(400) }
+    } catch(e: Throwable) { meshUrlState = "caps-${e.javaClass.simpleName}"; "CAPS method=POST seedHost=" + seedHost + " seedLen=" + seedUrl.length + " FAIL " + LoginManager.errText(e, "").take(400) }
   }
 }

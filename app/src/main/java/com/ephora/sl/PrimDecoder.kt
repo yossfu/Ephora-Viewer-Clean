@@ -19,6 +19,10 @@ object PrimDecoder {
   var nZeroFix = 0L
   var nTerseQ = 0L
   var nTerseF = 0L
+  @Volatile var meshExtraBlocks = 0L
+  @Volatile var meshParams = 0L
+  @Volatile var meshIds = 0L
+  @Volatile var meshParamLast = "-"
   private val hexFam = LinkedHashSet<Int>()
   private val recs = LinkedHashMap<Long, Prim>()
   private val famShown = LinkedHashSet<Int>()
@@ -42,6 +46,10 @@ object PrimDecoder {
     nZeroFix = 0L
     nTerseQ = 0L
     nTerseF = 0L
+    meshExtraBlocks = 0L
+    meshParams = 0L
+    meshIds = 0L
+    meshParamLast = "-"
     vecLogged = false
     vecMemo = null
     vecTaken = false
@@ -736,8 +744,9 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
         if (o + 66 > p.size) { try { stashFullMu("fix66", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
         val meshId = meshIdFromExtraParams(wExtra)
         try {
+          if (wExtra.isNotEmpty()) meshExtraBlocks++
           synchronized(recs) { recs[id]?.let { it.meshId = meshId ?: "" } }
-          if (meshId != null) MeshAssets.request(meshId)
+          if (meshId != null) { meshIds++; meshParamLast = meshId; MeshAssets.request(meshId) }
         } catch(_: Throwable) {}
         o += 66
         try { stashFullMu("ok", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}
@@ -759,6 +768,10 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
         val size = ByteBuffer.wrap(raw, o, 4).order(ByteOrder.LITTLE_ENDIAN).int
         o += 4
         if (size < 0 || size > 1024 || o + size > raw.size) return null
+        if (type == 0x30 || type == 0x60) {
+          meshParams++
+          meshParamLast = "type=${type.toString(16)} size=$size"
+        }
         if ((type == 0x30 || type == 0x60) && size >= 17 && ((raw[o + 16].toInt() and 255) and 0x0f) == 5) {
           val hex = hexPrev(raw.copyOfRange(o, o + 16), 16).lowercase(Locale.US)
           return hex.substring(0, 8) + "-" + hex.substring(8, 12) + "-" + hex.substring(12, 16) + "-" + hex.substring(16, 20) + "-" + hex.substring(20, 32)
@@ -768,6 +781,7 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
     } catch (_: Throwable) {}
     return null
   }
+  fun meshStatus(): String = "MESH-PRIM extra=$meshExtraBlocks params=$meshParams ids=$meshIds last=$meshParamLast"
   private fun parseCached(p: ByteArray): Int {
     try {
       if (p.size < 11) return 0

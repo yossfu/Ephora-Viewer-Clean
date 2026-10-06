@@ -111,6 +111,49 @@ object TerrainMesh {
       return H[y * 256 + x]
     } catch (_: Throwable) { return Float.NaN }
   }
+  /** Fill a missing LandPatch sample from the nearest valid samples around the hole. */
+  fun heightAtFilled(x: Int, y: Int, fallback: Float): Float {
+    val direct = heightAt(x, y)
+    if (direct.isFinite()) return direct
+    fun horizontal(): Float? {
+      var leftX = -1; var rightX = -1
+      var leftH = Float.NaN; var rightH = Float.NaN
+      for (d in 1..64) {
+        if (leftX < 0 && x - d in 0..255) heightAt(x - d, y).takeIf { it.isFinite() }?.let { leftX = x - d; leftH = it }
+        if (rightX < 0 && x + d in 0..255) heightAt(x + d, y).takeIf { it.isFinite() }?.let { rightX = x + d; rightH = it }
+        if (leftX >= 0 && rightX >= 0) break
+      }
+      return when {
+        leftX >= 0 && rightX >= 0 -> leftH + (rightH - leftH) * ((x - leftX).toFloat() / (rightX - leftX).toFloat())
+        leftX >= 0 -> leftH
+        rightX >= 0 -> rightH
+        else -> null
+      }
+    }
+    fun vertical(): Float? {
+      var topY = -1; var bottomY = -1
+      var topH = Float.NaN; var bottomH = Float.NaN
+      for (d in 1..64) {
+        if (topY < 0 && y - d in 0..255) heightAt(x, y - d).takeIf { it.isFinite() }?.let { topY = y - d; topH = it }
+        if (bottomY < 0 && y + d in 0..255) heightAt(x, y + d).takeIf { it.isFinite() }?.let { bottomY = y + d; bottomH = it }
+        if (topY >= 0 && bottomY >= 0) break
+      }
+      return when {
+        topY >= 0 && bottomY >= 0 -> topH + (bottomH - topH) * ((y - topY).toFloat() / (bottomY - topY).toFloat())
+        topY >= 0 -> topH
+        bottomY >= 0 -> bottomH
+        else -> null
+      }
+    }
+    val h = horizontal()
+    val v = vertical()
+    return when {
+      h != null && v != null -> (h + v) * 0.5f
+      h != null -> h
+      v != null -> v
+      else -> fallback
+    }
+  }
   fun meanH(): Float {
     try {
       var s = 0.0

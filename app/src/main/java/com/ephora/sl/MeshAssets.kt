@@ -51,8 +51,8 @@ object MeshAssets {
     .connectTimeout(15, TimeUnit.SECONDS)
     .readTimeout(45, TimeUnit.SECONDS)
     .callTimeout(60, TimeUnit.SECONDS)
-    .followRedirects(false)
-    .followSslRedirects(false)
+    .followRedirects(true)
+    .followSslRedirects(true)
     .build()
 
   fun resetSession() {

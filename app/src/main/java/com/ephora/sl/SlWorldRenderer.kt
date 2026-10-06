@@ -23,7 +23,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   var lastFase = "inicio"
   var startOk = false
     private set
-  private var running = false
+  @Volatile private var running = false
   private var view: GLSurfaceView? = null
   private var configuredSurface: GLSurfaceView? = null
   private var width = 1
@@ -68,6 +68,9 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var touchCount = 0L
   private var lastTouch = 0L
   private var lastFrame = 0L
+  @Volatile private var firstFrameLatencyMs = -1L
+  private var openStartedAt = 0L
+  private var openGeneration = 0
   private var sceneObjects = 0
   private var meshObjects = 0
   private val glTextures = LinkedHashMap<String, Int>()
@@ -79,6 +82,10 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     return try {
       view = surface
       if (fw > 1 && fh > 1) applyMetrics(fw, fh) else applyMetrics(surface.width, surface.height)
+      openGeneration++
+      val generation = openGeneration
+      openStartedAt = SystemClock.elapsedRealtime()
+      firstFrameLatencyMs = -1L
       running = true
       startOk = true
       lastFase = "esperando-GLES"
@@ -95,7 +102,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       surface.post {
         if (running) {
           try { surface.onResume(); surface.requestRender() } catch (_: Throwable) {}
-          surface.postDelayed({ if (running) try { surface.requestRender() } catch (_: Throwable) {} }, 350L)
+          requestFirstFrame(surface, generation, 0)
         }
       }
       surface.setOnTouchListener { _, e -> onTouch(e); true }
@@ -107,6 +114,26 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       lastFase = "start"
       false
     }
+  }
+
+  /** Recovers the first visible frame if Android attached the GL surface after the activity resumed. */
+  private fun requestFirstFrame(surface: GLSurfaceView, generation: Int, attempt: Int) {
+    if (!running || generation != openGeneration || firstFrameLatencyMs >= 0L || attempt >= 16) return
+    try {
+      if (attempt == 6) {
+        // Mirror one lifecycle refresh automatically; users should not have to background the app.
+        surface.onPause()
+        surface.postDelayed({
+          if (running && generation == openGeneration && firstFrameLatencyMs < 0L) {
+            try { surface.onResume(); surface.requestRender() } catch (_: Throwable) {}
+            requestFirstFrame(surface, generation, attempt + 1)
+          }
+        }, 100L)
+      } else {
+        surface.requestRender()
+        surface.postDelayed({ requestFirstFrame(surface, generation, attempt + 1) }, 150L)
+      }
+    } catch (_: Throwable) {}
   }
 
   private fun onTouch(e: MotionEvent) {
@@ -197,7 +224,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       meshObjects = 0
       updateTerrain()
       drawTerrain()
-      drawWater()
+      if (DRAW_WATER_SURFACE) drawWater()
       drawAvatar(p, q, r)
       val n = objects.size.coerceAtMost(MAX_OBJECTS)
       for (i in 0 until n) {
@@ -258,6 +285,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       if (fpsT0 == 0L) fpsT0 = now
       if (now - fpsT0 >= 3000L) { fps = (fpsFrames * 1000L / (now - fpsT0).coerceAtLeast(1L)).toInt(); fpsFrames = 0; fpsT0 = now }
       lastFrame = now
+      if (firstFrameLatencyMs < 0L) firstFrameLatencyMs = (now - openStartedAt).coerceAtLeast(0L)
       if (now - lastStats >= 5000L) { lastStats = now; try { onStats?.invoke(gfxLine()) } catch (_: Throwable) {} }
     } catch (e: Throwable) {
       initError = "frame " + e.javaClass.simpleName + ":" + (e.message ?: "")
@@ -352,8 +380,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     val mean = TerrainMesh.meanH().takeIf { it.isFinite() } ?: 22f
     val values = FloatArray(n * n)
     for (j in 0 until n) for (i in 0 until n) {
-      val h = TerrainMesh.heightAt(i * TERRAIN_STEP, j * TERRAIN_STEP)
-      values[j * n + i] = if (h.isFinite()) h else mean
+      values[j * n + i] = TerrainMesh.heightAtFilled(i * TERRAIN_STEP, j * TERRAIN_STEP, mean)
     }
     val vertices = ByteBuffer.allocateDirect(n * n * STRIDE).order(ByteOrder.nativeOrder()).asFloatBuffer()
     for (j in 0 until n) for (i in 0 until n) {
@@ -445,7 +472,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     val v = compile(GLES20.GL_VERTEX_SHADER, vs); val f = compile(GLES20.GL_FRAGMENT_SHADER, fs); val p = GLES20.glCreateProgram()
     GLES20.glAttachShader(p,v); GLES20.glAttachShader(p,f); GLES20.glLinkProgram(p); val ok = IntArray(1); GLES20.glGetProgramiv(p,GLES20.GL_LINK_STATUS,ok,0); if (ok[0] == 0) throw IllegalStateException(GLES20.glGetProgramInfoLog(p)); GLES20.glDeleteShader(v); GLES20.glDeleteShader(f); return p
   }
-  fun gfxLine(): String = "GFX-DIAG backend=GLES fps=$fps obj=$sceneObjects meshReady=$meshObjects tex=" + texturedObjects + " cacheGPU=" + glTextures.size + " draws=$drawCount terrain=" + TerrainMesh.patchesGot() + "/256 frameAgeMs=" + frameAgeMs() + " startOk=" + (if (startOk) "si" else "no") + " fase=$lastFase initErr=" + (initError ?: "-") + " eye=" + "%.1f,%.1f,%.1f".format(targetX + cos(orbitYaw)*orbitDistance, targetY + sin(orbitPitch)*orbitDistance, targetZ + sin(orbitYaw)*orbitDistance) + " target=" + "%.1f,%.1f,%.1f".format(targetX,targetY,targetZ) + " " + ImageAssets.status() + " " + MeshAssets.status()
+  fun gfxLine(): String = "GFX-DIAG backend=GLES fps=$fps firstFrameMs=$firstFrameLatencyMs obj=$sceneObjects meshReady=$meshObjects tex=" + texturedObjects + " cacheGPU=" + glTextures.size + " draws=$drawCount terrain=" + TerrainMesh.patchesGot() + "/256 water=" + (if (DRAW_WATER_SURFACE) "on" else "off") + " frameAgeMs=" + frameAgeMs() + " startOk=" + (if (startOk) "si" else "no") + " fase=$lastFase initErr=" + (initError ?: "-") + " eye=" + "%.1f,%.1f,%.1f".format(targetX + cos(orbitYaw)*orbitDistance, targetY + sin(orbitPitch)*orbitDistance, targetZ + sin(orbitYaw)*orbitDistance) + " target=" + "%.1f,%.1f,%.1f".format(targetX,targetY,targetZ) + " " + ImageAssets.status() + " " + MeshAssets.status()
   fun sunState(): String = "WORLD-SCENE backend=GLES mesh=procedural terrainPatches=" + TerrainMesh.patchesGot()
   fun projectLabel(fx: Double, fy: Double, fz: Double): Pair<Float,Float>? = null
   fun frameAgeMs(): Long = if (lastFrame > 0L) (SystemClock.elapsedRealtime() - lastFrame).coerceAtLeast(0L) else -1L
@@ -459,6 +486,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     private const val SPHERE_VERTS = 12 * 16 * 6
     private const val CYLINDER_VERTS = 16 * 12
     private const val WATER_LEVEL = 20f
+    private const val DRAW_WATER_SURFACE = false
     private const val TERRAIN_RES = 129
     private const val TERRAIN_STEP = 2
     private const val MAX_OBJECTS = 2048

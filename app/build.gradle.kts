@@ -1,6 +1,6 @@
 plugins { id("com.android.application"); kotlin("android") }
 android { namespace = "com.ephora.sl"; compileSdk = 34; ndkVersion = "27.0.12077973"
-defaultConfig { applicationId = "com.ephora.sl"; minSdk = 29; targetSdk = 34; versionCode = 107; versionName = "7.42"
+defaultConfig { applicationId = "com.ephora.sl"; minSdk = 29; targetSdk = 34; versionCode = 108; versionName = "7.42"
 externalNativeBuild { cmake { cppFlags += "-std=c++17"; abiFilters += listOf("arm64-v8a") } } }
 compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
 externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1+" } }
