@@ -27,6 +27,31 @@ object AgentLoop {
   val ackNoShown = LinkedHashSet<Long>()
   @Volatile var loopSock: DatagramSocket? = null
   @Volatile var loopAddr: InetAddress? = null
+  @Volatile var throttleLastMs = 0L
+  @Volatile var throttleSentN = 0L
+  @Volatile var throttleLastTag = "-"
+  fun sendThrottle(tag: String) {
+    try {
+      val s = LoginManager.Session
+      val sk = loopSock ?: return
+      val ad = loopAddr ?: return
+      if (s.agentId.isBlank() || s.sessionId.isBlank() || s.simPort == 0) return
+      val th = UdpCircuit.agentThrottle(s.agentId, s.sessionId, s.circuitCode)
+      sk.send(DatagramPacket(th, th.size, ad, s.simPort))
+      tx++
+      throttleSentN++
+      throttleLastMs = System.currentTimeMillis()
+      throttleLastTag = tag
+      onTick?.invoke(UdpCircuit.txHex("AgentThrottle", UdpCircuit.lastSeq(), th) + " tag=" + tag + " preset=500 total=512000Bps n=" + throttleSentN)
+    } catch(_: Throwable) {}
+  }
+  fun throttleLine(): String {
+    try {
+      return "enviados=" + throttleSentN + " ultimo-tag=" + throttleLastTag + " edadMs=" + (System.currentTimeMillis() - throttleLastMs)
+    } catch(_: Throwable) {
+      return "throttleLine-error"
+    }
+  }
   fun sendChatNow(text: String, tag: String): Boolean {
     return try {
       val s = LoginManager.Session
@@ -580,6 +605,7 @@ object AgentLoop {
               py = y.toDouble()
               pz = z.toDouble()
               try { onTick?.invoke("POS-SIM x=" + x + " y=" + y + " z=" + z) } catch(_: Throwable) {}
+              try { sendThrottle("entrada") } catch(_: Throwable) {}
             }
           }
         } catch(_: Throwable) {}
@@ -705,6 +731,9 @@ object AgentLoop {
     try { destLine = "IMAGE-DEST pendiente" } catch(_: Throwable) {}
     try { imgUnrelSent.clear() } catch(_: Throwable) {}
     try { loopT0 = System.currentTimeMillis() } catch(_: Throwable) {}
+    try { throttleSentN = 0L } catch(_: Throwable) {}
+    try { throttleLastMs = 0L } catch(_: Throwable) {}
+    try { throttleLastTag = "-" } catch(_: Throwable) {}
     try { PrimDecoder.texIdsReset() } catch(_: Throwable) {}
     try { PrimDecoder.onTexLine = { tl -> try { onTick?.invoke(tl) } catch(_: Throwable) {} } } catch(_: Throwable) {}
     job = scope.launch(Dispatchers.IO) {
@@ -719,7 +748,7 @@ object AgentLoop {
         sock.soTimeout = 15
         try { sock.receiveBufferSize = 262144 } catch(_: Throwable) {}
         val addr = loopAddr!!
-        try { val th = UdpCircuit.agentThrottle(s.agentId, s.sessionId, s.circuitCode); sock.send(DatagramPacket(th, th.size, addr, s.simPort)); tx++; onTick?.invoke(UdpCircuit.txHex("AgentThrottle", UdpCircuit.lastSeq(), th) + " preset=500 total=512000Bps") } catch(_: Throwable) {}
+        try { sendThrottle("arranque") } catch(_: Throwable) {}
         var t0 = System.currentTimeMillis()
         var last = System.currentTimeMillis()
         var lastAuSend = 0L
@@ -832,6 +861,7 @@ object AgentLoop {
             t0 = now
             lastTick = "tick10s tx=" + tx
             try { onTick?.invoke("AU tx=" + tx) } catch(_: Throwable) {}
+            try { if (now - throttleLastMs > 90000L) sendThrottle("refresco") } catch(_: Throwable) {}
             try { if (imgRxCount > 0 || rxDescartados > 0) onTick?.invoke("IMAGE-RX-N n=" + imgRxCount + " RX-DESCARTADOS n=" + rxDescartados) } catch(_: Throwable) {}
             try {
               if (loopSock != null && loopAddr != null) {
