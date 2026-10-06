@@ -17,6 +17,8 @@ object AgentLoop {
   var pz = 25.0
   var coarseSeen = false
   var coarseN = 0
+  var posCoarseInit = false
+  var posCoarseLastEmit = 0L
   var movOn = false
   var pingTx = 0L
   var lastPingId = -1
@@ -448,6 +450,30 @@ object AgentLoop {
       nearMin = best
       nearPos = pts
       nearLine = "NEAR-ESTADO n=" + n + " min=" + best.toInt() + "m"
+      try {
+        val youOff = 1 + n * 3
+        if (payload.size >= youOff + 4) {
+          val ibb = ByteBuffer.wrap(payload, youOff, 4).order(ByteOrder.LITTLE_ENDIAN)
+          val you = ibb.short.toInt()
+          val prey = ibb.short.toInt()
+          if (you >= 0 && you < pts.size) {
+            val me = pts[you]
+            val ox = px
+            val oy = py
+            val oz = pz
+            px = me.first
+            py = me.second
+            pz = me.third
+            val moved = Math.sqrt((px - ox) * (px - ox) + (py - oy) * (py - oy) + (pz - oz) * (pz - oz))
+            val now2 = System.currentTimeMillis()
+            if (!posCoarseInit || moved > 2.0 || now2 - posCoarseLastEmit > 60000L) {
+              posCoarseInit = true
+              posCoarseLastEmit = now2
+              try { onTick?.invoke("POS-COARSE you=" + you + " prey=" + prey + " pos=" + posStr()) } catch(_: Throwable) {}
+            }
+          }
+        }
+      } catch(_: Throwable) {}
       val now = System.currentTimeMillis()
       if (now - nearLastEmit >= 10000L) {
         nearLastEmit = now
@@ -536,6 +562,24 @@ object AgentLoop {
                 try { onTick?.invoke(line) } catch(_: Throwable) {}
               }
             } catch(_: Throwable) {}
+          }
+        } catch(_: Throwable) {}
+      }
+      if (mid == 0xFFFF00FA.toInt()) {
+        try {
+          val d = UdpCircuit.decode(buf, len)
+          val pl = d?.payload ?: ByteArray(0)
+          if (pl.size >= 44) {
+            val bb = ByteBuffer.wrap(pl, 32, 12).order(ByteOrder.LITTLE_ENDIAN)
+            val x = bb.float
+            val y = bb.float
+            val z = bb.float
+            if (x.isFinite() && y.isFinite() && z.isFinite() && x >= 0f && x <= 256f && y >= 0f && y <= 256f && z >= -100f && z <= 2000f) {
+              px = x.toDouble()
+              py = y.toDouble()
+              pz = z.toDouble()
+              try { onTick?.invoke("POS-SIM x=" + x + " y=" + y + " z=" + z) } catch(_: Throwable) {}
+            }
           }
         } catch(_: Throwable) {}
       }
@@ -730,7 +774,7 @@ object AgentLoop {
                     }
                   } catch(_: Throwable) {}
                 }
-                if (rx != null && rx.msgId != 1 && rx.msgId != 2 && rx.msgId != 4 && rx.msgId != 0xFF06 && rx.msgId != 12 && rx.msgId != 13 && rx.msgId != 14 && rx.msgId != 15 && rx.msgId != 16 && rx.msgId != 0xFFFFFFFB.toInt() && rx.msgId != 0xFFFF008B.toInt() && rx.msgId != 9 && rx.msgId != 10 && rx.msgId != 86 && rx.msgId != 64 && rx.msgId != 66 && rx.msgId != 69 && rx.msgId != 72 && rx.msgId != 73 && rx.msgId != -1 && rx.msgId != 11 && rx.msgId != 0xFFFF0094.toInt() && rx.msgId != 0xFFFF00FE.toInt() && rx.msgId != 0xFFFF00EC.toInt() && rx.msgId != 236 && rx.msgId != 0xFFFF0142.toInt() && rx.msgId != 0xFFFF0143.toInt() && rx.msgId != 0xFFFF0056.toInt()) {
+                if (rx != null && rx.msgId != 1 && rx.msgId != 2 && rx.msgId != 4 && rx.msgId != 0xFF06 && rx.msgId != 12 && rx.msgId != 13 && rx.msgId != 14 && rx.msgId != 15 && rx.msgId != 16 && rx.msgId != 0xFFFFFFFB.toInt() && rx.msgId != 0xFFFF008B.toInt() && rx.msgId != 9 && rx.msgId != 10 && rx.msgId != 86 && rx.msgId != 64 && rx.msgId != 66 && rx.msgId != 69 && rx.msgId != 72 && rx.msgId != 73 && rx.msgId != -1 && rx.msgId != 11 && rx.msgId != 0xFFFF00FA.toInt() && rx.msgId != 0xFFFF0094.toInt() && rx.msgId != 0xFFFF00FE.toInt() && rx.msgId != 0xFFFF00EC.toInt() && rx.msgId != 236 && rx.msgId != 0xFFFF0142.toInt() && rx.msgId != 0xFFFF0143.toInt() && rx.msgId != 0xFFFF0056.toInt()) {
                   try {
                     val d = UdpCircuit.decode(p.data, p.length)
                     if (d != null) {

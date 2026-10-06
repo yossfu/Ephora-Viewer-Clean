@@ -51,7 +51,7 @@ object TexFetch {
     } catch(_: Throwable) { return loc }
   }
   private fun getOnce(client: okhttp3.OkHttpClient, url: String): TexResp {
-    val req = okhttp3.Request.Builder().url(url).get().header("Accept", "*/*").header("Accept-Encoding", "identity").header("User-Agent", "EPHORASL/7.47 (Android)").header("Connection", "close").build()
+    val req = okhttp3.Request.Builder().url(url).get().header("Accept", "*/*").header("Accept-Encoding", "identity").header("User-Agent", "EPHORASL/7.48 (Android)").header("Connection", "close").build()
     client.newCall(req).execute().use { resp ->
       val code = resp.code
       val hd = resp.headers
