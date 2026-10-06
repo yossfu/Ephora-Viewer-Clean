@@ -41,6 +41,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var cube: FloatBuffer? = null
   private var sphere: FloatBuffer? = null
   private var cylinder: FloatBuffer? = null
+  private var waterPlane: FloatBuffer? = null
   private var terrain: FloatBuffer? = null
   private var terrainIndices: ShortBuffer? = null
   private var terrainCount = 0
@@ -68,6 +69,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var lastTouch = 0L
   private var lastFrame = 0L
   private var sceneObjects = 0
+  private var meshObjects = 0
   private val glTextures = LinkedHashMap<String, Int>()
   private var texturedObjects = 0
 
@@ -77,6 +79,9 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     return try {
       view = surface
       if (fw > 1 && fh > 1) applyMetrics(fw, fh) else applyMetrics(surface.width, surface.height)
+      running = true
+      startOk = true
+      lastFase = "esperando-GLES"
       if (configuredSurface !== surface) {
         surface.setEGLContextClientVersion(2)
         surface.setEGLConfigChooser(8, 8, 8, 0, 16, 0)
@@ -87,12 +92,17 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       surface.renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
       surface.onResume()
       surface.requestRender()
+      surface.post {
+        if (running) {
+          try { surface.onResume(); surface.requestRender() } catch (_: Throwable) {}
+          surface.postDelayed({ if (running) try { surface.requestRender() } catch (_: Throwable) {} }, 350L)
+        }
+      }
       surface.setOnTouchListener { _, e -> onTouch(e); true }
-      running = true
-      startOk = true
-      lastFase = "esperando-GLES"
       true
     } catch (e: Throwable) {
+      running = false
+      startOk = false
       initError = e.javaClass.simpleName + ":" + (e.message ?: "")
       lastFase = "start"
       false
@@ -153,6 +163,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       cube = makeCube()
       sphere = makeSphere()
       cylinder = makeCylinder()
+      waterPlane = makeWaterPlane()
       terrainVersion = -1L
       lastFase = "GLES-ok"
     } catch (e: Throwable) {
@@ -183,6 +194,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       Matrix.multiplyMM(vp, 0, projection, 0, camera, 0)
       drawCount = 0
       texturedObjects = 0
+      meshObjects = 0
       updateTerrain()
       drawTerrain()
       drawWater()
@@ -208,7 +220,19 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
         val isCylinder = !isSphere && o.pathCurve == 0x10 && (o.profileCurve and 0x0f) == 0
         val mesh = if (isSphere) sphere else if (isCylinder) cylinder else cube
         val vertexCount = if (isSphere) SPHERE_VERTS else if (isCylinder) CYLINDER_VERTS else CUBE_VERTS
-        if (isAvatar) {
+        val meshGeometry = if (!isAvatar && o.meshId.isNotEmpty()) MeshAssets.mesh(o.meshId) else null
+        if (meshGeometry != null) {
+          meshObjects++
+          for ((faceIndex, face) in meshGeometry.faces.withIndex()) {
+            if (face == null) continue
+            val tf = o.texFaces.getOrNull(faceIndex) ?: o.texFaces.firstOrNull()
+            val tex = tf?.uuid?.takeUnless { it == NULL_TEXTURE_UUID } ?: o.tex
+            val tint = if (tf != null) floatArrayOf(tf.r, tf.g, tf.b, tf.a) else color
+            drawMesh(face.vertices, face.vertexCount, x, y, z, sx, sz, sy, o.yaw, tint, tex,
+              tf?.scaleS ?: o.texScaleS, tf?.scaleT ?: o.texScaleT,
+              tf?.offsetS ?: o.texOffsetS, tf?.offsetT ?: o.texOffsetT, tf?.rotation ?: o.texRotation)
+          }
+        } else if (isAvatar) {
           drawMesh(mesh, vertexCount, x, y, z, sx, sy, sz, o.yaw, color)
         } else if (!isCylinder && !isSphere && mesh != null && o.texFaces.size >= 6) {
           for (face in 0 until 6) {
@@ -310,8 +334,13 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     drawCount++
   }
   private fun drawWater() {
-    val b = cube ?: return
-    drawMesh(b, CUBE_VERTS, 0.0, 19.8, 0.0, 256f, 0.08f, 256f, 0f, floatArrayOf(0.16f, 0.40f, 0.58f, 1f))
+    val b = waterPlane ?: return
+    GLES20.glEnable(GLES20.GL_BLEND)
+    GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+    GLES20.glDepthMask(false)
+    drawMesh(b, 6, 0.0, WATER_LEVEL.toDouble(), 0.0, 256f, 1f, 256f, 0f, floatArrayOf(0.10f, 0.34f, 0.50f, 0.48f))
+    GLES20.glDepthMask(true)
+    GLES20.glDisable(GLES20.GL_BLEND)
   }
   private fun drawAvatar(x: Double, y: Double, z: Double) {
     drawMesh(sphere, SPHERE_VERTS, x, y + 0.9, z, 0.42f, 0.9f, 0.32f, 0f, floatArrayOf(0.12f, 0.76f, 0.86f, 1f))
@@ -362,6 +391,19 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     }
     out.position(0); return out
   }
+  private fun makeWaterPlane(): FloatBuffer {
+    val out = ByteBuffer.allocateDirect(6 * STRIDE).order(ByteOrder.nativeOrder()).asFloatBuffer()
+    val v = arrayOf(
+      floatArrayOf(-0.5f, 0f, -0.5f, 0f, 1f, 0f, 0f, 0f),
+      floatArrayOf( 0.5f, 0f, -0.5f, 0f, 1f, 0f, 1f, 0f),
+      floatArrayOf( 0.5f, 0f,  0.5f, 0f, 1f, 0f, 1f, 1f),
+      floatArrayOf(-0.5f, 0f, -0.5f, 0f, 1f, 0f, 0f, 0f),
+      floatArrayOf( 0.5f, 0f,  0.5f, 0f, 1f, 0f, 1f, 1f),
+      floatArrayOf(-0.5f, 0f,  0.5f, 0f, 1f, 0f, 0f, 1f))
+    for (vertex in v) out.put(vertex)
+    out.position(0)
+    return out
+  }
   private fun makeSphere(): FloatBuffer {
     val out = ByteBuffer.allocateDirect(SPHERE_VERTS * STRIDE).order(ByteOrder.nativeOrder()).asFloatBuffer()
     val latN = 12; val lonN = 16
@@ -403,7 +445,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     val v = compile(GLES20.GL_VERTEX_SHADER, vs); val f = compile(GLES20.GL_FRAGMENT_SHADER, fs); val p = GLES20.glCreateProgram()
     GLES20.glAttachShader(p,v); GLES20.glAttachShader(p,f); GLES20.glLinkProgram(p); val ok = IntArray(1); GLES20.glGetProgramiv(p,GLES20.GL_LINK_STATUS,ok,0); if (ok[0] == 0) throw IllegalStateException(GLES20.glGetProgramInfoLog(p)); GLES20.glDeleteShader(v); GLES20.glDeleteShader(f); return p
   }
-  fun gfxLine(): String = "GFX-DIAG backend=GLES fps=$fps obj=$sceneObjects tex=" + texturedObjects + " cacheGPU=" + glTextures.size + " draws=$drawCount terrain=" + TerrainMesh.patchesGot() + "/256 startOk=" + (if (startOk) "si" else "no") + " fase=$lastFase initErr=" + (initError ?: "-") + " eye=" + "%.1f,%.1f,%.1f".format(targetX + cos(orbitYaw)*orbitDistance, targetY + sin(orbitPitch)*orbitDistance, targetZ + sin(orbitYaw)*orbitDistance) + " target=" + "%.1f,%.1f,%.1f".format(targetX,targetY,targetZ) + " " + ImageAssets.status()
+  fun gfxLine(): String = "GFX-DIAG backend=GLES fps=$fps obj=$sceneObjects meshReady=$meshObjects tex=" + texturedObjects + " cacheGPU=" + glTextures.size + " draws=$drawCount terrain=" + TerrainMesh.patchesGot() + "/256 frameAgeMs=" + frameAgeMs() + " startOk=" + (if (startOk) "si" else "no") + " fase=$lastFase initErr=" + (initError ?: "-") + " eye=" + "%.1f,%.1f,%.1f".format(targetX + cos(orbitYaw)*orbitDistance, targetY + sin(orbitPitch)*orbitDistance, targetZ + sin(orbitYaw)*orbitDistance) + " target=" + "%.1f,%.1f,%.1f".format(targetX,targetY,targetZ) + " " + ImageAssets.status() + " " + MeshAssets.status()
   fun sunState(): String = "WORLD-SCENE backend=GLES mesh=procedural terrainPatches=" + TerrainMesh.patchesGot()
   fun projectLabel(fx: Double, fy: Double, fz: Double): Pair<Float,Float>? = null
   fun frameAgeMs(): Long = if (lastFrame > 0L) (SystemClock.elapsedRealtime() - lastFrame).coerceAtLeast(0L) else -1L
@@ -416,6 +458,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     private const val CUBE_VERTS = 36
     private const val SPHERE_VERTS = 12 * 16 * 6
     private const val CYLINDER_VERTS = 16 * 12
+    private const val WATER_LEVEL = 20f
     private const val TERRAIN_RES = 129
     private const val TERRAIN_STEP = 2
     private const val MAX_OBJECTS = 2048

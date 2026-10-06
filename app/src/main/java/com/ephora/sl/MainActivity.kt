@@ -406,6 +406,7 @@ class MainActivity : ComponentActivity() {
       UdpCircuit.resetRx()
       try { TexFetch.reset() } catch(_: Throwable) {}
       try { PrimDecoder.reset() } catch(_: Throwable) {}
+      try { MeshAssets.resetSession() } catch(_: Throwable) {}
       try { gfxOpenLatch = "?" } catch(_: Throwable) {}
       try { gfxExitLatch = "?" } catch(_: Throwable) {}
       try { uiBeatMs = System.currentTimeMillis() } catch(_: Throwable) {}
@@ -441,6 +442,7 @@ class MainActivity : ComponentActivity() {
       try { sesionFlag = "fresca" } catch(_: Throwable) {}
       try { mundoT0 = System.currentTimeMillis() } catch(_: Throwable) {}
       val ls = EphoraService.loopScope(scope)
+      try { MeshAssets.start(ls, CapsManager.meshUrl) } catch(_: Throwable) {}
       AgentLoop.onTick = { line -> scope.launch { udpLog(line) } }
       EventQueue.EQLoop.onTick = { line -> scope.launch { udpLog(line) } }
       AgentLoop.start(ls)

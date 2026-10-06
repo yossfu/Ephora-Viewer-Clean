@@ -4,7 +4,7 @@ import java.nio.ByteOrder
 import java.util.Locale
 object PrimDecoder {
   data class TextureFace(val uuid: String, val scaleS: Float, val scaleT: Float, val offsetS: Float, val offsetT: Float, val rotation: Float, val r: Float, val g: Float, val b: Float, val a: Float)
-  data class Prim(val id: Long, var tipo: Int, var x: Double, var y: Double, var z: Double, var sx: Float, var sy: Float, var sz: Float, var yaw: Float, var seen: Long, var mat: Int = -1, var tex: String = "", var texScaleS: Float = 1f, var texScaleT: Float = 1f, var texOffsetS: Float = 0f, var texOffsetT: Float = 0f, var texRotation: Float = 0f, var texR: Float = 1f, var texG: Float = 1f, var texB: Float = 1f, var texA: Float = 1f, var texFaces: List<TextureFace> = emptyList(), var pathCurve: Int = 0x10, var profileCurve: Int = 0x01)
+  data class Prim(val id: Long, var tipo: Int, var x: Double, var y: Double, var z: Double, var sx: Float, var sy: Float, var sz: Float, var yaw: Float, var seen: Long, var mat: Int = -1, var tex: String = "", var texScaleS: Float = 1f, var texScaleT: Float = 1f, var texOffsetS: Float = 0f, var texOffsetT: Float = 0f, var texRotation: Float = 0f, var texR: Float = 1f, var texG: Float = 1f, var texB: Float = 1f, var texA: Float = 1f, var texFaces: List<TextureFace> = emptyList(), var pathCurve: Int = 0x10, var profileCurve: Int = 0x01, var meshId: String = "")
   var nTerse = 0L
   var nComp = 0L
   var nFull = 0L
@@ -174,7 +174,7 @@ object PrimDecoder {
           (255 - (c[0].toInt() and 255)) / 255f, (255 - (c[1].toInt() and 255)) / 255f,
           (255 - (c[2].toInt() and 255)) / 255f, (255 - (c[3].toInt() and 255)) / 255f)
       }
-      return TextureEntryFields((0 until 6).map(::makeFace))
+      return TextureEntryFields((0 until 45).map(::makeFace))
     } catch (_: Throwable) { return null }
   }  private fun zeroExpand(data: ByteArray): ByteArray {
     try {
@@ -611,6 +611,7 @@ object PrimDecoder {
         var wA = ByteArray(0)
         var wC = ByteArray(0)
         var wD = ByteArray(0)
+        var wExtra = ByteArray(0)
         if (o + 40 > p.size) { try { stashFullMu("hdr40", muId, muIlen, muPc, muIn, 0, 0, 0) } catch(_: Throwable) {}; break }
         val hb = p.copyOfRange(o, o + 40)
         val bb = ByteBuffer.wrap(hb).order(ByteOrder.LITTLE_ENDIAN)
@@ -720,8 +721,10 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
         if (o < 0) { try { stashFullMu("skF", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
         o = skipVar(p, o, false)
         if (o < 0) { try { stashFullMu("skG", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
-        o = skipVar(p, o, false)
-        if (o < 0) { try { stashFullMu("skH", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
+        sgv = skipGet(p, o, false)
+        if (sgv.first < 0) { try { stashFullMu("skH", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
+        o = sgv.first
+        wExtra = sgv.second
         // TextureEntry V2 has the default image UUID first, then typed fields with face overrides.
         try {
           val te = parseTextureEntry(wA)
@@ -731,12 +734,39 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
           }
         } catch(_: Throwable) {}
         if (o + 66 > p.size) { try { stashFullMu("fix66", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
+        val meshId = meshIdFromExtraParams(wExtra)
+        try {
+          synchronized(recs) { recs[id]?.let { it.meshId = meshId ?: "" } }
+          if (meshId != null) MeshAssets.request(meshId)
+        } catch(_: Throwable) {}
         o += 66
         try { stashFullMu("ok", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}
         got += 1
       }
       return got
     } catch(_: Throwable) { return 0 }
+  }
+  private fun meshIdFromExtraParams(raw: ByteArray): String? {
+    try {
+      if (raw.isEmpty()) return null
+      var o = 0
+      val count = raw[o++].toInt() and 255
+      if (count > 32) return null
+      repeat(count) {
+        if (o + 6 > raw.size) return null
+        val type = u16at(raw, o)
+        o += 2
+        val size = ByteBuffer.wrap(raw, o, 4).order(ByteOrder.LITTLE_ENDIAN).int
+        o += 4
+        if (size < 0 || size > 1024 || o + size > raw.size) return null
+        if ((type == 0x30 || type == 0x60) && size >= 17 && ((raw[o + 16].toInt() and 255) and 0x0f) == 5) {
+          val hex = hexPrev(raw.copyOfRange(o, o + 16), 16).lowercase(Locale.US)
+          return hex.substring(0, 8) + "-" + hex.substring(8, 12) + "-" + hex.substring(12, 16) + "-" + hex.substring(16, 20) + "-" + hex.substring(20, 32)
+        }
+        o += size
+      }
+    } catch (_: Throwable) {}
+    return null
   }
   private fun parseCached(p: ByteArray): Int {
     try {

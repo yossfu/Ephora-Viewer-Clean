@@ -6,6 +6,7 @@ object CapsManager {
   var caps: Map<String,String> = emptyMap()
   var capsCount = 0
   @Volatile var viewerAssetUrl = ""
+  @Volatile var meshUrl = ""
   var seedHost = ""
   var lastEqUrl = ""
   var rawHasEQ = false
@@ -65,6 +66,32 @@ object CapsManager {
     }
     return out
   }
+  private fun metadataUrl(txt: String, capName: String): String {
+    try {
+      val metadata = txt.indexOf("<key>Metadata</key>")
+      if (metadata < 0) return ""
+      val key = txt.indexOf("<key>$capName</key>", metadata)
+      if (key < 0) return ""
+      val mapStart = txt.indexOf("<map>", key)
+      val mapEnd = if (mapStart >= 0) txt.indexOf("</map>", mapStart) else -1
+      if (mapStart < 0 || mapEnd < 0) return ""
+      val block = txt.substring(mapStart, mapEnd)
+      val urlKey = block.indexOf("<key>url</key>")
+      if (urlKey < 0) return ""
+      val stringAt = block.indexOf("<string>", urlKey)
+      val uriAt = block.indexOf("<uri>", urlKey)
+      val at = when {
+        stringAt < 0 -> uriAt
+        uriAt < 0 -> stringAt
+        else -> minOf(stringAt, uriAt)
+      }
+      if (at < 0) return ""
+      val tag = if (at == uriAt) "uri" else "string"
+      val end = block.indexOf("</$tag>", at)
+      if (end < 0) return ""
+      return block.substring(at + tag.length + 2, end).trim().takeIf { it.startsWith("http") } ?: ""
+    } catch (_: Throwable) { return "" }
+  }
   suspend fun fetchSeed(seedUrl: String): String = withContext(Dispatchers.IO) {
     if (seedUrl.isBlank()) return@withContext "CAPS method=POST code=- seed vacia: haz LOGIN primero"
     seedHost = seedHostOf(seedUrl)
@@ -89,9 +116,10 @@ object CapsManager {
         capsCount = caps.size
         lastEqUrl = caps["EventQueueGet"] ?: ""
         try { viewerAssetUrl = caps["ViewerAsset"] ?: "" } catch(_: Throwable) {}
+        try { meshUrl = metadataUrl(txt, "GetMesh2").ifBlank { metadataUrl(txt, "GetMesh") } } catch(_: Throwable) { meshUrl = "" }
         val hasEq = if (lastEqUrl.isNotBlank()) "si" else "no"
         val meta = metaSubKeys(txt)
-        "CAPS method=POST seedHost=" + seedHost + " seedLen=" + seedUrl.length + " seedTieneCap=" + hasCap + " seedTail4=" + tail4 + " reqCaps=" + WANT.size + " reqBodyLen=" + reqBody.length + " reqPreview=" + reqPrev + " code=200 respLen=" + txt.length + " respPreview=" + txt.replace("\r", "").replace("\n", " ").take(800) + " keys=" + lastKeys.joinToString(",") + " rawTieneEQ=" + (if (rawHasEQ) "si" else "no") + " tieneEventQueueGet=" + hasEq + " capsCount=" + capsCount + " metaKeys=" + meta.joinToString(",")
+        "CAPS method=POST seedHost=" + seedHost + " seedLen=" + seedUrl.length + " seedTieneCap=" + hasCap + " seedTail4=" + tail4 + " reqCaps=" + WANT.size + " reqBodyLen=" + reqBody.length + " reqPreview=" + reqPrev + " code=200 respLen=" + txt.length + " respPreview=" + txt.replace("\r", "").replace("\n", " ").take(800) + " keys=" + lastKeys.joinToString(",") + " rawTieneEQ=" + (if (rawHasEQ) "si" else "no") + " tieneEventQueueGet=" + hasEq + " capsCount=" + capsCount + " metaKeys=" + meta.joinToString(",") + " meshCap=" + (if (meshUrl.isBlank()) "no" else "si")
       }
     } catch(e: Throwable) { "CAPS method=POST seedHost=" + seedHost + " seedLen=" + seedUrl.length + " FAIL " + LoginManager.errText(e, "").take(400) }
   }
