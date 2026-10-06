@@ -4,7 +4,7 @@ import java.nio.ByteOrder
 import java.util.Locale
 object PrimDecoder {
   data class TextureFace(val uuid: String, val scaleS: Float, val scaleT: Float, val offsetS: Float, val offsetT: Float, val rotation: Float, val r: Float, val g: Float, val b: Float, val a: Float)
-  data class Prim(val id: Long, var tipo: Int, var x: Double, var y: Double, var z: Double, var sx: Float, var sy: Float, var sz: Float, var yaw: Float, var seen: Long, var mat: Int = -1, var tex: String = "", var texScaleS: Float = 1f, var texScaleT: Float = 1f, var texOffsetS: Float = 0f, var texOffsetT: Float = 0f, var texRotation: Float = 0f, var texR: Float = 1f, var texG: Float = 1f, var texB: Float = 1f, var texA: Float = 1f, var texFaces: List<TextureFace> = emptyList(), var pathCurve: Int = 0x10, var profileCurve: Int = 0x01, var meshId: String = "")
+  data class Prim(val id: Long, var tipo: Int, var x: Double, var y: Double, var z: Double, var sx: Float, var sy: Float, var sz: Float, var yaw: Float, var seen: Long, var mat: Int = -1, var tex: String = "", var texScaleS: Float = 1f, var texScaleT: Float = 1f, var texOffsetS: Float = 0f, var texOffsetT: Float = 0f, var texRotation: Float = 0f, var texR: Float = 1f, var texG: Float = 1f, var texB: Float = 1f, var texA: Float = 1f, var texFaces: List<TextureFace> = emptyList(), var pathCurve: Int = 0x10, var profileCurve: Int = 0x01, var meshId: String = "", var hasShape: Boolean = false, var shPb: Float = 0f, var shPe: Float = 1f, var shPsx: Float = 1f, var shPsy: Float = 1f, var shShx: Float = 0f, var shShy: Float = 0f, var shTw: Float = 0f, var shTwb: Float = 0f, var shRo: Float = 0f, var shTpx: Float = 0f, var shTpy: Float = 0f, var shRev: Float = 0f, var shSk: Float = 0f, var shQb: Float = 0f, var shQe: Float = 1f, var shQh: Float = 0f)
   var nTerse = 0L
   var nComp = 0L
   var nFull = 0L
@@ -791,10 +791,26 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
         // CITA-PLANTILLA ObjectUpdate (message_template.msg): ParentID U32(4)+UpdateFlags U32(4)+PathCurve/ProfileCurve(2)+PathBegin/End(4)+ScaleX/Y+ShearX/Y(4)+Twist..Skew(7)+ProfileBegin/End/Hollow(6)=31B; luego TextureEntry V2 primera. Empirico [00,len-lo]=ProfileHollow-hi+TEntry-len-lo.
         // NOTA narrow: TextureEntry es Variable 2 por plantilla; leerla en U8 contradice la plantilla (TextureAnim de 50-149B es inverosimil).
         if (o + 31 > p.size) { try { stashFullMu("in30", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
-        val pathCurve = p[o + 8].toInt() and 255
-        val profileCurve = p[o + 9].toInt() and 255
+        val fPathCurve = p[o + 8].toInt() and 255
+        val fProfileCurve = p[o + 9].toInt() and 255
+        val fPb = (u16at(p, o + 10) * 0.00002f).coerceIn(0f, 1f)
+        val fPe = (u16at(p, o + 12) * 0.00002f).coerceIn(0f, 1f)
+        val fPsx = (p[o + 14].toInt() and 255) / 100f
+        val fPsy = (p[o + 15].toInt() and 255) / 100f
+        val fShx = (p[o + 16].toInt() and 255) / 100f - 0.5f
+        val fShy = (p[o + 17].toInt() and 255) / 100f - 0.5f
+        val fTw = p[o + 18].toInt() / 100f
+        val fTwb = p[o + 19].toInt() / 100f
+        val fRo = p[o + 20].toInt() / 100f
+        val fTpx = p[o + 21].toInt() / 100f
+        val fTpy = p[o + 22].toInt() / 100f
+        val fRev = (p[o + 23].toInt() and 255) * 0.015f
+        val fSk = p[o + 24].toInt() / 100f
+        val fQb = (u16at(p, o + 25) * 0.00002f).coerceIn(0f, 1f)
+        val fQe = (u16at(p, o + 27) * 0.00002f).coerceIn(0f, 1f)
+        val fQh = (u16at(p, o + 29) * 0.00002f).coerceIn(0f, 1f)
         o += 31
-        try { synchronized(recs) { recs[id]?.let { it.pathCurve = pathCurve; it.profileCurve = profileCurve } } } catch(_: Throwable) {}
+        try { synchronized(recs) { recs[id]?.let { it.pathCurve = fPathCurve; it.profileCurve = fProfileCurve; it.hasShape = true; it.shPb = fPb; it.shPe = fPe; it.shPsx = fPsx; it.shPsy = fPsy; it.shShx = fShx; it.shShy = fShy; it.shTw = fTw; it.shTwb = fTwb; it.shRo = fRo; it.shTpx = fTpx; it.shTpy = fTpy; it.shRev = fRev; it.shSk = fSk; it.shQb = fQb; it.shQe = fQe; it.shQh = fQh } } } catch(_: Throwable) {}
         var sgv = skipGet(p, o, true)
         if (sgv.first < 0) { try { stashSkA(muId, muIlen, muPc, muIn, o, p.size, p) } catch(_: Throwable) {}; break }
         o = sgv.first

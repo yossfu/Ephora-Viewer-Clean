@@ -206,7 +206,7 @@ object MeshAssets {
       .header("Range", "bytes=$start-$end")
       .header("Accept", "*/*")
       .header("Accept-Encoding", "identity")
-      .header("User-Agent", "EPHORASL/7.53 (Android)")
+      .header("User-Agent", "EPHORASL/7.54 (Android)")
       .build()
     client.newCall(request).execute().use { response ->
       if (!response.isSuccessful) throw IllegalStateException("http-${response.code}")
