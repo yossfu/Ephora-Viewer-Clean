@@ -249,11 +249,21 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       if (DRAW_WATER_SURFACE) drawWater()
       drawAvatar(p, q, r)
       val n = objects.size.coerceAtMost(MAX_OBJECTS)
+      val minX = eyeX - 220.0; val maxX = eyeX + 220.0
+      val minZ = eyeZ - 220.0; val maxZ = eyeZ + 220.0
+      val visibleMeshIds = ArrayList<String>()
+      for (i in 0 until n) {
+        val o = objects[i]
+        val x = o.x - 128.0
+        val z = -(o.y - 128.0)
+        if (o.tipo != 47 && o.meshId.isNotEmpty() && x in minX..maxX && z in minZ..maxZ) {
+          visibleMeshIds.add(o.meshId)
+        }
+      }
+      MeshAssets.updateVisibleMeshes(visibleMeshIds)
       for (i in 0 until n) {
         val o = objects[i]
         val x = o.x - 128.0; val y = o.z; val z = -(o.y - 128.0)
-        val minX = eyeX - 220.0; val maxX = eyeX + 220.0
-        val minZ = eyeZ - 220.0; val maxZ = eyeZ + 220.0
         if (x < minX || x > maxX || z < minZ || z > maxZ) continue
         val sx = o.sx.coerceIn(0.05f, 64f); val sy = o.sy.coerceIn(0.05f, 64f); val sz = o.sz.coerceIn(0.05f, 64f)
         val isAvatar = o.tipo == 47

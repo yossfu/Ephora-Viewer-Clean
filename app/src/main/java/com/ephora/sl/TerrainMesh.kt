@@ -170,6 +170,19 @@ object TerrainMesh {
       return n
     } catch (_: Throwable) { return 0 }
   }
+  fun coverageStatus(limit: Int = 12): String {
+    try {
+      val missing = ArrayList<String>()
+      var count = 0
+      for (py in 0 until 16) for (px in 0 until 16) {
+        if (!gotPatch[py * 16 + px]) {
+          count++
+          if (missing.size < limit) missing.add("$px,$py")
+        }
+      }
+      return "holes=$count" + if (missing.isEmpty()) "" else "[${missing.joinToString(";")}]"
+    } catch (_: Throwable) { return "holes=?" }
+  }
   @Volatile var nTerraZero = 0L
   private var hexLine: String? = null
   private fun zeroExpandLocal(data: ByteArray): ByteArray {

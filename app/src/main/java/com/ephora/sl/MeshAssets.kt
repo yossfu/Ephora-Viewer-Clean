@@ -15,6 +15,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import java.util.Locale
+import java.util.ArrayDeque
 import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPInputStream
 import java.util.zip.InflaterInputStream
@@ -27,10 +28,12 @@ object MeshAssets {
   private const val MAX_HEADER_BYTES = 4096
   private const val MAX_MESH_BYTES = 16 * 1024 * 1024
   private const val MAX_DECOMPRESSED_BYTES = 32 * 1024 * 1024
-  // Keep enough recently-used geometry for the current 47-object region view.
-  // The old 12-entry LRU evicted meshes while the renderer was cycling through
-  // visible objects, so most of them silently fell back to procedural shapes.
+  // Keep enough recently-used geometry for the active region view. Visible meshes
+  // are pinned separately so background requests cannot evict geometry in use.
   private const val MAX_CACHE_ENTRIES = 48
+  private const val MAX_PENDING = 128
+  private const val RETRY_BASE_MS = 2500L
+  private const val RETRY_MAX_MS = 60000L
   private const val MAX_VERTICES_PER_FACE = 65535
   private const val MAX_EXPANDED_VERTICES = 350000
 
@@ -45,11 +48,14 @@ object MeshAssets {
   @Volatile var last = "-"
 
   private val lock = Any()
-  private var queue = Channel<String>(Channel.UNLIMITED)
+  private var wakeups = Channel<Unit>(Channel.CONFLATED)
+  private val backgroundQueue = ArrayDeque<String>()
+  private val visibleQueue = ArrayDeque<String>()
   private val scheduled = LinkedHashSet<String>()
-  private val cache = object : LinkedHashMap<String, Mesh>(32, 0.75f, true) {
-    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Mesh>?): Boolean = size > MAX_CACHE_ENTRIES
-  }
+  private val visible = LinkedHashSet<String>()
+  private val failuresById = HashMap<String, Int>()
+  private val retryAt = HashMap<String, Long>()
+  private val cache = LinkedHashMap<String, Mesh>(32, 0.75f, true)
   private val client = OkHttpClient.Builder()
     .connectTimeout(15, TimeUnit.SECONDS)
     .readTimeout(45, TimeUnit.SECONDS)
@@ -63,9 +69,14 @@ object MeshAssets {
       meshCap = ""
       worker?.cancel()
       worker = null
-      queue.close()
-      queue = Channel(Channel.UNLIMITED)
+      wakeups.close()
+      wakeups = Channel(Channel.CONFLATED)
+      backgroundQueue.clear()
+      visibleQueue.clear()
       scheduled.clear()
+      visible.clear()
+      failuresById.clear()
+      retryAt.clear()
       cache.clear()
       requested = 0L
       decoded = 0L
@@ -82,17 +93,39 @@ object MeshAssets {
     }
     synchronized(lock) {
       if (worker?.isActive == true) return
-      val channel = queue
+      val signal = wakeups
       worker = scope.launch(Dispatchers.IO) {
-        for (id in channel) {
+        while (isActive) {
+          val id = synchronized(lock) {
+            when {
+              visibleQueue.isNotEmpty() -> visibleQueue.removeFirst()
+              backgroundQueue.isNotEmpty() -> backgroundQueue.removeFirst()
+              else -> null
+            }
+          }
+          if (id == null) {
+            if (signal.receiveCatching().isClosed) break
+            continue
+          }
           try {
             val mesh = fetchAndDecode(id)
-            synchronized(cache) { cache[id] = mesh }
+            synchronized(lock) {
+              cache[id] = mesh
+              failuresById.remove(id)
+              retryAt.remove(id)
+              trimCacheLocked()
+            }
             decoded++
             last = "ok:$id faces=${mesh.faces.size}"
           } catch (e: CancellationException) {
             throw e
           } catch (e: Throwable) {
+            synchronized(lock) {
+              val failuresForId = ((failuresById[id] ?: 0) + 1).coerceAtMost(6)
+              failuresById[id] = failuresForId
+              val delay = (RETRY_BASE_MS shl (failuresForId - 1)).coerceAtMost(RETRY_MAX_MS)
+              retryAt[id] = System.currentTimeMillis() + delay
+            }
             failed++
             last = "fail:$id ${e.javaClass.simpleName}:${(e.message ?: "").take(80)}"
           } finally {
@@ -106,18 +139,57 @@ object MeshAssets {
   fun request(meshId: String) {
     val id = meshId.trim().lowercase(Locale.US)
     if (!isUuid(id) || meshCap.isBlank()) return
-    synchronized(cache) { if (cache.containsKey(id)) return }
     synchronized(lock) {
-      if (worker?.isActive != true || scheduled.contains(id)) return
-      if (scheduled.size >= 128) return
-      scheduled.add(id)
-      if (queue.trySend(id).isSuccess) requested++ else scheduled.remove(id)
+      enqueueLocked(id, prioritize = false)
     }
   }
 
-  fun mesh(id: String): Mesh? = synchronized(cache) { cache[id.lowercase(Locale.US)] }
+  /** Refresh the active set each render frame; visible misses are queued ahead of background assets. */
+  fun updateVisibleMeshes(meshIds: Collection<String>) {
+    val ids = meshIds.asSequence().map { it.trim().lowercase(Locale.US) }
+      .filter(::isUuid).distinct().take(128).toList()
+    synchronized(lock) {
+      visible.clear()
+      visible.addAll(ids)
+      trimCacheLocked()
+      if (meshCap.isBlank() || worker?.isActive != true) return
+      for (id in ids) enqueueLocked(id, prioritize = true)
+    }
+  }
 
-  fun status(): String = "MESH-ASSETS req=$requested decoded=$decoded failed=$failed cache=${synchronized(cache) { cache.size }} pending=${synchronized(lock) { scheduled.size }} last=$last"
+  private fun enqueueLocked(id: String, prioritize: Boolean) {
+    if (cache.containsKey(id)) return
+    if ((retryAt[id] ?: 0L) > System.currentTimeMillis()) return
+    if (worker?.isActive != true) return
+    if (scheduled.contains(id)) {
+      if (prioritize && backgroundQueue.remove(id)) visibleQueue.addFirst(id)
+      wakeups.trySend(Unit)
+      return
+    }
+    if (scheduled.size >= MAX_PENDING) {
+      // Make room for current geometry by dropping the oldest queued background request.
+      val stale = backgroundQueue.pollLast()
+      if (stale != null) scheduled.remove(stale) else return
+    }
+    scheduled.add(id)
+    if (prioritize) visibleQueue.addLast(id) else backgroundQueue.addLast(id)
+    requested++
+    wakeups.trySend(Unit)
+  }
+
+  private fun trimCacheLocked() {
+    val limit = maxOf(MAX_CACHE_ENTRIES, visible.size)
+    while (cache.size > limit) {
+      val victim = cache.keys.firstOrNull { it !in visible } ?: break
+      cache.remove(victim)
+    }
+  }
+
+  fun mesh(id: String): Mesh? = synchronized(lock) { cache[id.lowercase(Locale.US)] }
+
+  fun status(): String = synchronized(lock) {
+    "MESH-ASSETS req=$requested decoded=$decoded failed=$failed cache=${cache.size} visible=${visible.size} pending=${scheduled.size} retry=${retryAt.size} last=$last"
+  }
 
   private fun isUuid(s: String): Boolean = s.matches(Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"))
 
