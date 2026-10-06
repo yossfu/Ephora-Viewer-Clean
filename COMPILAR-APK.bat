@@ -4,7 +4,7 @@ chcp 65001 >nul
 title EPHORASL - Compilar APK Debug
 
 echo ============================================
-echo  EPHORASL 7.52 - Compilar APK (base commit c6ecaf9 + mundo-texturas-1 + wire-ids)
+echo  EPHORASL 7.53 - Compilar APK (base commit c6ecaf9 + mundo-texturas-1 + wire-ids)
 echo  Run 37424518117 - workflow EPHORASL Android APK
 echo ============================================
 echo.

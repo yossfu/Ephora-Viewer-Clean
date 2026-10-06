@@ -298,7 +298,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
           for (face in 0 until 6) {
             val f = o.texFaces[face]
             val uuid = if (f.uuid != NULL_TEXTURE_UUID) f.uuid else o.tex
-            drawMesh(mesh, 6, x, y, z, sx, sy, sz, o.yaw, floatArrayOf(f.r, f.g, f.b, f.a),
+            drawMesh(mesh, 6, x, y, z, sx, sz, sy, o.yaw, floatArrayOf(f.r, f.g, f.b, f.a),
               uuid, f.scaleS, f.scaleT, f.offsetS, f.offsetT, f.rotation, face * 6)
           }
           if (o.texFaces.any { it.uuid != NULL_TEXTURE_UUID && glTextures.containsKey(it.uuid.lowercase()) }) texturedObjects++
@@ -306,7 +306,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
           val face0 = o.texFaces.firstOrNull()
           val tex = face0?.uuid?.takeUnless { it == NULL_TEXTURE_UUID } ?: o.tex
           val tint = if (face0 != null) floatArrayOf(face0.r, face0.g, face0.b, face0.a) else color
-          drawMesh(mesh, vertexCount, x, y, z, sx, sy, sz, o.yaw, tint, tex,
+          drawMesh(mesh, vertexCount, x, y, z, sx, sz, sy, o.yaw, tint, tex,
             face0?.scaleS ?: o.texScaleS, face0?.scaleT ?: o.texScaleT,
             face0?.offsetS ?: o.texOffsetS, face0?.offsetT ?: o.texOffsetT, face0?.rotation ?: o.texRotation)
           if (tex.isNotEmpty() && glTextures.containsKey(tex.lowercase())) texturedObjects++
