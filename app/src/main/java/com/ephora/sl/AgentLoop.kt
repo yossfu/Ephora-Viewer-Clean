@@ -655,11 +655,11 @@ object AgentLoop {
                 try { objetos = PrimDecoder.publish(px, py, pz) } catch(_: Throwable) {}
               }
             } catch(_: Throwable) {}
-            if (mid == 14) {
+            if (mid == 12 || mid == 13 || mid == 14 || mid == 15) {
               try {
                 val now = System.currentTimeMillis()
-                if (now - lastReqMultT >= 1000L) {
-                  val ids = try { PrimDecoder.drainReqMult(64) } catch(_: Throwable) { emptyList<Long>() }
+                if (now - lastReqMultT >= 500L) {
+                  val ids = try { PrimDecoder.drainReqMult(96) } catch(_: Throwable) { emptyList<Long>() }
                   if (ids.isNotEmpty()) {
                     lastReqMultT = now
                     try {

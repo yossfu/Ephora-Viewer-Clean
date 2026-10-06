@@ -141,7 +141,7 @@ object UdpCircuit {
     return out.toByteArray()
   }
   fun requestMultipleObjects(agentId: String, sessionId: String, ids: List<Long>): ByteArray {
-    val take = ids.take(64)
+    val take = ids.take(96)
     val p = ByteBuffer.allocate(2 + 16 + 16 + 1 + take.size * 5).order(ByteOrder.LITTLE_ENDIAN)
     p.put(0xFF.toByte())
     p.put(0x03.toByte())
