@@ -40,6 +40,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var useTextureLoc = -1
   private var cube: FloatBuffer? = null
   private var sphere: FloatBuffer? = null
+  private var cylinder: FloatBuffer? = null
   private var terrain: FloatBuffer? = null
   private var terrainIndices: ShortBuffer? = null
   private var terrainCount = 0
@@ -149,6 +150,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       glTextures.clear()
       cube = makeCube()
       sphere = makeSphere()
+      cylinder = makeCylinder()
       terrainVersion = -1L
       lastFase = "GLES-ok"
     } catch (e: Throwable) {
@@ -200,10 +202,29 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
           o.mat == 1 -> floatArrayOf(0.57f, 0.62f, 0.66f, 1f)
           else -> floatArrayOf(0.66f, 0.63f, 0.58f, 1f)
         }
-        drawMesh(if (isAvatar) sphere else cube, if (isAvatar) SPHERE_VERTS else CUBE_VERTS, x, y, z, sx, sy, sz, o.yaw, color,
-          if (isAvatar) "" else o.tex, o.texScaleS, o.texScaleT, o.texOffsetS, o.texOffsetT, o.texRotation)
-        if (!isAvatar && o.tex.isNotEmpty() && glTextures.containsKey(o.tex.lowercase())) texturedObjects++
-      }
+        val isSphere = isAvatar || (o.pathCurve == 0x20 || o.pathCurve == 0x21) && (o.profileCurve and 0x0f) == 0
+        val isCylinder = !isSphere && o.pathCurve == 0x10 && (o.profileCurve and 0x0f) == 0
+        val mesh = if (isSphere) sphere else if (isCylinder) cylinder else cube
+        val vertexCount = if (isSphere) SPHERE_VERTS else if (isCylinder) CYLINDER_VERTS else CUBE_VERTS
+        if (isAvatar) {
+          drawMesh(mesh, vertexCount, x, y, z, sx, sy, sz, o.yaw, color)
+        } else if (!isCylinder && !isSphere && mesh != null && o.texFaces.size >= 6) {
+          for (face in 0 until 6) {
+            val f = o.texFaces[face]
+            val uuid = if (f.uuid != NULL_TEXTURE_UUID) f.uuid else o.tex
+            drawMesh(mesh, 6, x, y, z, sx, sy, sz, o.yaw, floatArrayOf(f.r, f.g, f.b, f.a),
+              uuid, f.scaleS, f.scaleT, f.offsetS, f.offsetT, f.rotation, face * 6)
+          }
+          if (o.texFaces.any { it.uuid != NULL_TEXTURE_UUID && glTextures.containsKey(it.uuid.lowercase()) }) texturedObjects++
+        } else {
+          val face0 = o.texFaces.firstOrNull()
+          val tex = face0?.uuid?.takeUnless { it == NULL_TEXTURE_UUID } ?: o.tex
+          val tint = if (face0 != null) floatArrayOf(face0.r, face0.g, face0.b, face0.a) else color
+          drawMesh(mesh, vertexCount, x, y, z, sx, sy, sz, o.yaw, tint, tex,
+            face0?.scaleS ?: o.texScaleS, face0?.scaleT ?: o.texScaleT,
+            face0?.offsetS ?: o.texOffsetS, face0?.offsetT ?: o.texOffsetT, face0?.rotation ?: o.texRotation)
+          if (tex.isNotEmpty() && glTextures.containsKey(tex.lowercase())) texturedObjects++
+        }
       sceneObjects = n
       fpsFrames++
       val now = SystemClock.elapsedRealtime()
@@ -219,7 +240,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var lastStats = 0L
 
   private fun drawMesh(buffer: FloatBuffer?, vertexCount: Int, x: Double, y: Double, z: Double, sx: Float, sy: Float, sz: Float, yaw: Float, color: FloatArray,
-                       textureUuid: String = "", scaleS: Float = 1f, scaleT: Float = 1f, offsetS: Float = 0f, offsetT: Float = 0f, rotation: Float = 0f) {
+                       textureUuid: String = "", scaleS: Float = 1f, scaleT: Float = 1f, offsetS: Float = 0f, offsetT: Float = 0f, rotation: Float = 0f, firstVertex: Int = 0) {
     val b = buffer ?: return
     Matrix.setIdentityM(model, 0)
     Matrix.translateM(model, 0, x.toFloat(), y.toFloat(), z.toFloat())
@@ -242,7 +263,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     b.position(6)
     GLES20.glVertexAttribPointer(uvLoc, 2, GLES20.GL_FLOAT, false, STRIDE, b)
     GLES20.glEnableVertexAttribArray(posLoc); GLES20.glEnableVertexAttribArray(normalLoc); GLES20.glEnableVertexAttribArray(uvLoc)
-    GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, vertexCount)
+    GLES20.glDrawArrays(GLES20.GL_TRIANGLES, firstVertex, vertexCount)
     drawCount++
   }
   private fun textureFor(uuid: String): Int {
@@ -324,12 +345,12 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
 
   private fun makeCube(): FloatBuffer {
     val faces = arrayOf(
-      floatArrayOf(1f,0f,0f, .5f,-.5f,-.5f, .5f,.5f,-.5f, .5f,.5f,.5f, .5f,-.5f,.5f),
-      floatArrayOf(-1f,0f,0f, -.5f,-.5f,.5f, -.5f,.5f,.5f, -.5f,.5f,-.5f, -.5f,-.5f,-.5f),
       floatArrayOf(0f,1f,0f, -.5f,.5f,-.5f, -.5f,.5f,.5f, .5f,.5f,.5f, .5f,.5f,-.5f),
       floatArrayOf(0f,-1f,0f, -.5f,-.5f,.5f, -.5f,-.5f,-.5f, .5f,-.5f,-.5f, .5f,-.5f,.5f),
       floatArrayOf(0f,0f,1f, -.5f,-.5f,.5f, .5f,-.5f,.5f, .5f,.5f,.5f, -.5f,.5f,.5f),
-      floatArrayOf(0f,0f,-1f, .5f,-.5f,-.5f, -.5f,-.5f,-.5f, -.5f,.5f,-.5f, .5f,.5f,-.5f))
+      floatArrayOf(1f,0f,0f, .5f,-.5f,-.5f, .5f,.5f,-.5f, .5f,.5f,.5f, .5f,-.5f,.5f),
+      floatArrayOf(0f,0f,-1f, .5f,-.5f,-.5f, -.5f,-.5f,-.5f, -.5f,.5f,-.5f, .5f,.5f,-.5f),
+      floatArrayOf(-1f,0f,0f, -.5f,-.5f,.5f, -.5f,.5f,.5f, -.5f,.5f,-.5f, -.5f,-.5f,-.5f))
     val uv = floatArrayOf(0f,0f, 1f,0f, 1f,1f, 0f,1f)
     val out = ByteBuffer.allocateDirect(CUBE_VERTS * STRIDE).order(ByteOrder.nativeOrder()).asFloatBuffer()
     for (f in faces) {
@@ -352,6 +373,28 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     }
     out.position(0); return out
   }
+  private fun makeCylinder(): FloatBuffer {
+    val segments = 16
+    val out = ByteBuffer.allocateDirect(CYLINDER_VERTS * STRIDE).order(ByteOrder.nativeOrder()).asFloatBuffer()
+    fun v(x: Float, y: Float, z: Float, nx: Float, ny: Float, nz: Float, u: Float, t: Float) {
+      out.put(x).put(y).put(z).put(nx).put(ny).put(nz).put(u).put(t)
+    }
+    for (i in 0 until segments) {
+      val a0 = 2.0 * Math.PI * i / segments
+      val a1 = 2.0 * Math.PI * (i + 1) / segments
+      val x0 = (0.5 * kotlin.math.cos(a0)).toFloat(); val z0 = (0.5 * kotlin.math.sin(a0)).toFloat()
+      val x1 = (0.5 * kotlin.math.cos(a1)).toFloat(); val z1 = (0.5 * kotlin.math.sin(a1)).toFloat()
+      val n0x = (2.0 * x0).toFloat(); val n0z = (2.0 * z0).toFloat()
+      val n1x = (2.0 * x1).toFloat(); val n1z = (2.0 * z1).toFloat()
+      val u0 = i.toFloat() / segments; val u1 = (i + 1).toFloat() / segments
+      v(x0,-0.5f,z0,n0x,0f,n0z,u0,0f); v(x0,0.5f,z0,n0x,0f,n0z,u0,1f); v(x1,0.5f,z1,n1x,0f,n1z,u1,1f)
+      v(x0,-0.5f,z0,n0x,0f,n0z,u0,0f); v(x1,0.5f,z1,n1x,0f,n1z,u1,1f); v(x1,-0.5f,z1,n1x,0f,n1z,u1,0f)
+      v(0f,0.5f,0f,0f,1f,0f,0.5f,0.5f); v(x1,0.5f,z1,0f,1f,0f,0.5f+x1,0.5f+z1); v(x0,0.5f,z0,0f,1f,0f,0.5f+x0,0.5f+z0)
+      v(0f,-0.5f,0f,0f,-1f,0f,0.5f,0.5f); v(x0,-0.5f,z0,0f,-1f,0f,0.5f+x0,0.5f+z0); v(x1,-0.5f,z1,0f,-1f,0f,0.5f+x1,0.5f+z1)
+    }
+    out.position(0)
+    return out
+  }
   private fun linkProgram(vs: String, fs: String): Int {
     fun compile(type: Int, src: String): Int { val sh = GLES20.glCreateShader(type); GLES20.glShaderSource(sh, src); GLES20.glCompileShader(sh); val ok = IntArray(1); GLES20.glGetShaderiv(sh, GLES20.GL_COMPILE_STATUS, ok, 0); if (ok[0] == 0) throw IllegalStateException(GLES20.glGetShaderInfoLog(sh)); return sh }
     val v = compile(GLES20.GL_VERTEX_SHADER, vs); val f = compile(GLES20.GL_FRAGMENT_SHADER, fs); val p = GLES20.glCreateProgram()
@@ -369,9 +412,11 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     private const val STRIDE = 8 * 4
     private const val CUBE_VERTS = 36
     private const val SPHERE_VERTS = 12 * 16 * 6
+    private const val CYLINDER_VERTS = 16 * 12
     private const val TERRAIN_RES = 129
     private const val TERRAIN_STEP = 2
     private const val MAX_OBJECTS = 2048
+    private const val NULL_TEXTURE_UUID = "00000000-0000-0000-0000-000000000000"
     private const val VERTEX = """
       attribute vec3 aPosition; attribute vec3 aNormal; attribute vec2 aUv; uniform mat4 uMvp; varying vec3 vNormal; varying vec2 vUv;
       void main(){ gl_Position=uMvp*vec4(aPosition,1.0); vNormal=aNormal; vUv=vec2(aUv.x,1.0-aUv.y); }
