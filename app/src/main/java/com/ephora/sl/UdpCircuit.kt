@@ -126,6 +126,41 @@ object UdpCircuit {
     }
     return out.toByteArray()
   }
+  fun zeroEncode(data: ByteArray): ByteArray {
+    val out = mutableListOf<Byte>()
+    var i = 0
+    while (i < data.size) {
+      if (data[i] == 0.toByte()) {
+        var k = 0
+        while (i + k < data.size && data[i + k] == 0.toByte() && k < 255) k++
+        out.add(0.toByte())
+        out.add(k.toByte())
+        i += k
+      } else { out.add(data[i]); i++ }
+    }
+    return out.toByteArray()
+  }
+  fun requestMultipleObjects(agentId: String, sessionId: String, ids: List<Long>): ByteArray {
+    val take = ids.take(64)
+    val p = ByteBuffer.allocate(2 + 16 + 16 + 1 + take.size * 5).order(ByteOrder.LITTLE_ENDIAN)
+    p.put(0xFF.toByte())
+    p.put(0x03.toByte())
+    p.order(ByteOrder.BIG_ENDIAN)
+    p.put(uuidBE(agentId))
+    p.put(uuidBE(sessionId))
+    p.order(ByteOrder.LITTLE_ENDIAN)
+    p.put(take.size.toByte())
+    for (id in take) {
+      p.put(0x00.toByte())
+      p.putInt((id and 0xFFFFFFFFL).toInt())
+    }
+    val body = zeroEncode(p.array())
+    val bb = ByteBuffer.allocate(6).order(ByteOrder.BIG_ENDIAN)
+    bb.put(0xC0.toByte())
+    bb.putInt(seq++)
+    bb.put(0x00.toByte())
+    return bb.array() + body
+  }
   data class Rx(val flags: Int, val seq: Long, val msgId: Int, val name: String, val ackRx: Int, val raw: ByteArray)
   data class Decoded(val flags: Int, val seq: Long, val msgId: Int, val payload: ByteArray, val ackRx: Int)
   fun msgName(id: Int): String {

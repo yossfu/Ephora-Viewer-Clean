@@ -1,4 +1,4 @@
-EPHORASL 7.48 - ZIP para compilar (base commit c6ecaf9 + mundo-texturas-1 + wire-ids)
+EPHORASL 7.49 - ZIP para compilar (base commit c6ecaf9 + mundo-texturas-1 + wire-ids)
 ================================================
 Run: https://github.com/yossfu/Ephora-Viewer-Clean/actions/runs/37424518117
 Commit: c6ecaf927f1c962155c1c746d636c0b68bfb22c5
@@ -34,7 +34,7 @@ REQUISITOS (el .bat los verifica/instala solo)
 
 CONFIG
 ------
-- versionCode 116, versionName 7.48 (base c6ecaf9 era 110/7.42)
+- versionCode 117, versionName 7.49 (base c6ecaf9 era 110/7.42)
 - applicationId com.ephora.sl, minSdk 29, targetSdk 34, compileSdk 34
 - ndk 27.0.12077973, solo arm64-v8a
 - Si tu SDK no esta en %LOCALAPPDATA%\Android\Sdk, edita el .bat linea SET ANDROID_HOME.

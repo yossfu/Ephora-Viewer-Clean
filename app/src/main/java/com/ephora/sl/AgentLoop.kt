@@ -508,6 +508,7 @@ object AgentLoop {
     return resendSameSeq()
   }
   var movFlags = 0
+  var lastReqMultT = 0L
   var sx = 0.0
   var sy = 0.0
   var sz = 0.0
@@ -654,6 +655,30 @@ object AgentLoop {
                 try { objetos = PrimDecoder.publish(px, py, pz) } catch(_: Throwable) {}
               }
             } catch(_: Throwable) {}
+            if (mid == 14) {
+              try {
+                val now = System.currentTimeMillis()
+                if (now - lastReqMultT >= 1000L) {
+                  val ids = try { PrimDecoder.drainReqMult(64) } catch(_: Throwable) { emptyList<Long>() }
+                  if (ids.isNotEmpty()) {
+                    lastReqMultT = now
+                    try {
+                      val s = LoginManager.Session
+                      val sk = loopSock
+                      val ad = loopAddr
+                      if (s.agentId.isNotBlank() && s.sessionId.isNotBlank() && sk != null && ad != null && s.simPort != 0) {
+                        val b = UdpCircuit.requestMultipleObjects(s.agentId, s.sessionId, ids)
+                        sk.send(DatagramPacket(b, b.size, ad, s.simPort))
+                        tx++
+                        try { PrimDecoder.nReqMultSent += ids.size } catch(_: Throwable) {}
+                        try { PrimDecoder.nReqMultPk += 1 } catch(_: Throwable) {}
+                        try { onTick?.invoke("REQ-MULT n=" + ids.size + " " + PrimDecoder.reqMultLine()) } catch(_: Throwable) {}
+                      }
+                    } catch(_: Throwable) {}
+                  }
+                }
+              } catch(_: Throwable) {}
+            }
           }
         } catch(_: Throwable) {}
       }

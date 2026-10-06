@@ -25,6 +25,10 @@ object PrimDecoder {
   private val censoFull = LinkedHashSet<Long>()
   private val censoCached = LinkedHashSet<Long>()
   private val censoAttach = LinkedHashSet<Long>()
+  private val reqMultPend = LinkedHashSet<Long>()
+  private val reqMultDone = LinkedHashSet<Long>()
+  @Volatile var nReqMultSent = 0L
+  @Volatile var nReqMultPk = 0L
   private fun censoAdd(set: LinkedHashSet<Long>, id: Long) {
     try { synchronized(recs) { if (set.size < 20000) set.add(id) } } catch (_: Throwable) {}
   }
@@ -83,6 +87,10 @@ object PrimDecoder {
     try { synchronized(recs) { censoFull.clear() } } catch(_: Throwable) {}
     try { synchronized(recs) { censoCached.clear() } } catch(_: Throwable) {}
     try { synchronized(recs) { censoAttach.clear() } } catch(_: Throwable) {}
+    try { synchronized(recs) { reqMultPend.clear() } } catch(_: Throwable) {}
+    try { synchronized(recs) { reqMultDone.clear() } } catch(_: Throwable) {}
+    nReqMultSent = 0L
+    nReqMultPk = 0L
     meshExtraBlocks = 0L
     meshParams = 0L
     meshIds = 0L
@@ -850,6 +858,24 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
     return null
   }
   fun meshStatus(): String = "MESH-PRIM extra=$meshExtraBlocks params=$meshParams ids=$meshIds last=$meshParamLast"
+  fun drainReqMult(max: Int): List<Long> {
+    try {
+      synchronized(recs) {
+        val out = ArrayList<Long>(max)
+        val it = reqMultPend.iterator()
+        while (it.hasNext() && out.size < max) {
+          val id = it.next()
+          it.remove()
+          reqMultDone.add(id)
+          out.add(id)
+        }
+        return out
+      }
+    } catch(_: Throwable) { return emptyList() }
+  }
+  fun reqMultLine(): String {
+    return "REQ-MULT pend=" + (try { synchronized(recs) { reqMultPend.size } } catch(_: Throwable) { -1 }) + " done=" + (try { synchronized(recs) { reqMultDone.size } } catch(_: Throwable) { -1 }) + " sent=" + nReqMultSent + " pk=" + nReqMultPk
+  }
   private fun parseCached(p: ByteArray): Int {
     try {
       if (p.size < 11) return 0
@@ -858,7 +884,13 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
       if (11 + count * 12 > p.size) return 0
       var i = 0
       while (i < count) {
-        try { censoAdd(censoCached, ByteBuffer.wrap(p, 11 + i * 12, 4).order(ByteOrder.LITTLE_ENDIAN).int.toLong() and 0xFFFFFFFFL) } catch (_: Throwable) {}
+        try {
+          val id = ByteBuffer.wrap(p, 11 + i * 12, 4).order(ByteOrder.LITTLE_ENDIAN).int.toLong() and 0xFFFFFFFFL
+          synchronized(recs) {
+            censoAdd(censoCached, id)
+            if (!recs.containsKey(id) && !reqMultDone.contains(id) && reqMultPend.size < 20000) reqMultPend.add(id)
+          }
+        } catch (_: Throwable) {}
         i += 1
       }
       return count
@@ -1016,7 +1048,7 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
         try { extraQ.add("TERSEN") } catch(_: Throwable) {}
         try { extraQ.add("ATTN") } catch(_: Throwable) {}
         try { attachArmed = true } catch(_: Throwable) {}
-        val estLine = "PRIMS-ESTADO terse=" + nTerse + "/" + nObjTerse + "(q=" + nTerseQ + " f=" + nTerseF + ") comp=" + nComp + "/" + nObjComp + " full=" + nFull + "/" + nObjFull + " cached=" + nCached + " kill=" + nKill + "(hit=" + nKillHit + " miss=" + nKillMiss + ") fuera=" + nFueraRango + " lenMalo=" + nLenMalo + " escMala=" + nEscMala + " zeroFix=" + nZeroFix + " obj=" + count() + " FUERA-MUESTRA " + (if (fueraMuestra.isEmpty()) "ninguna" else fueraMuestra)
+        val estLine = "PRIMS-ESTADO terse=" + nTerse + "/" + nObjTerse + "(q=" + nTerseQ + " f=" + nTerseF + ") comp=" + nComp + "/" + nObjComp + " full=" + nFull + "/" + nObjFull + " cached=" + nCached + " kill=" + nKill + "(hit=" + nKillHit + " miss=" + nKillMiss + ") fuera=" + nFueraRango + " lenMalo=" + nLenMalo + " escMala=" + nEscMala + " zeroFix=" + nZeroFix + " obj=" + count() + " reqMultPend=" + (try { synchronized(recs) { reqMultPend.size } } catch(_: Throwable) { -1 }) + " reqMultSent=" + nReqMultSent + " reqMultPk=" + nReqMultPk + " FUERA-MUESTRA " + (if (fueraMuestra.isEmpty()) "ninguna" else fueraMuestra)
         try { estadoLatch = estLine } catch(_: Throwable) {}
         return estLine
       }
