@@ -9,7 +9,10 @@ object TerrainComposition {
   @Volatile var lastError: String? = null
     private set
 
-  fun textureIds(): List<String> = details
+  fun textureIds(): List<String> = details.filter { it != NULL_UUID }
+  fun detailTextures(): List<String> = details.map { if (it == NULL_UUID) "" else it }
+  fun startHeights(): List<Float> = starts
+  fun heightRanges(): List<Float> = ranges
   fun baseTexture(): String = details.firstOrNull { it != NULL_UUID }.orEmpty()
   fun status(): String = "TERRAIN-TEX ids=${details.count { it != NULL_UUID }} base=${baseTexture().take(8).ifEmpty { "-" }} bands=${starts.size}/4 err=${lastError ?: "-"}"
 

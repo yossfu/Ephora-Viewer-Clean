@@ -38,6 +38,10 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var uvRotationLoc = -1
   private var samplerLoc = -1
   private var useTextureLoc = -1
+  private var terrainModeLoc = -1
+  private var terrainSamplerLocs = IntArray(4) { -1 }
+  private var terrainStartLoc = -1
+  private var terrainRangeLoc = -1
   private var cube: FloatBuffer? = null
   private var sphere: FloatBuffer? = null
   private var cylinder: FloatBuffer? = null
@@ -47,6 +51,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var terrainCount = 0
   private var terrainVersion = -1L
   private var terrainTextureUuid = ""
+  private var terrainGpuTextures = 0
   private val projection = FloatArray(16)
   private val camera = FloatArray(16)
   private val model = FloatArray(16)
@@ -194,6 +199,10 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       uvRotationLoc = GLES20.glGetUniformLocation(program, "uUvRotation")
       samplerLoc = GLES20.glGetUniformLocation(program, "uTexture")
       useTextureLoc = GLES20.glGetUniformLocation(program, "uUseTexture")
+      terrainModeLoc = GLES20.glGetUniformLocation(program, "uTerrainMode")
+      terrainSamplerLocs = IntArray(4) { GLES20.glGetUniformLocation(program, "uTerrain$it") }
+      terrainStartLoc = GLES20.glGetUniformLocation(program, "uTerrainStart")
+      terrainRangeLoc = GLES20.glGetUniformLocation(program, "uTerrainRange")
       glTextures.clear()
       cube = makeCube()
       sphere = makeSphere()
@@ -321,6 +330,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     Matrix.multiplyMM(mvp, 0, vp, 0, model, 0)
     GLES20.glUniformMatrix4fv(mvpLoc, 1, false, mvp, 0)
     GLES20.glUniform4fv(colorLoc, 1, color, 0)
+    GLES20.glUniform1i(terrainModeLoc, 0)
     GLES20.glUniform4f(uvTransformLoc, scaleS, scaleT, offsetS, offsetT)
     GLES20.glUniform1f(uvRotationLoc, rotation)
     val texId = if (textureUuid.isNotEmpty()) textureFor(textureUuid) else 0
@@ -368,18 +378,39 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     terrainTextureUuid = TerrainComposition.baseTexture()
     Matrix.setIdentityM(mvp, 0); Matrix.multiplyMM(mvp, 0, vp, 0, mvp, 0)
     GLES20.glUniformMatrix4fv(mvpLoc, 1, false, mvp, 0)
-    GLES20.glUniform4f(colorLoc, 1f, 1f, 1f, 1f)
+    GLES20.glUniform4f(colorLoc, 0.38f, 0.48f, 0.29f, 1f)
     GLES20.glUniform4f(uvTransformLoc, 1f, 1f, 0f, 0f)
     GLES20.glUniform1f(uvRotationLoc, 0f)
-    val terrainTexture = if (terrainTextureUuid.isNotEmpty()) textureFor(terrainTextureUuid) else 0
-    GLES20.glUniform1i(useTextureLoc, if (terrainTexture != 0) 1 else 0)
-    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, terrainTexture)
+    val terrainIds = TerrainComposition.detailTextures().take(4)
+    val fallbackId = terrainIds.firstOrNull { it.isNotEmpty() } ?: terrainTextureUuid
+    val fallbackTexture = if (fallbackId.isNotEmpty()) textureFor(fallbackId) else 0
+    val textureIds = IntArray(4) { i ->
+      val uuid = terrainIds.getOrNull(i)?.takeIf { it.isNotEmpty() } ?: fallbackId
+      if (uuid.isNotEmpty()) textureFor(uuid).takeIf { it != 0 } ?: fallbackTexture else fallbackTexture
+    }
+    val hasTerrainTexture = textureIds.any { it != 0 }
+    terrainGpuTextures = textureIds.count { it != 0 }
+    GLES20.glUniform4f(colorLoc, if (hasTerrainTexture) 1f else 0.38f, if (hasTerrainTexture) 1f else 0.48f, if (hasTerrainTexture) 1f else 0.29f, 1f)
+    fun corners(values: List<Float>, fallback: Float): FloatArray =
+      if (values.size < 4) floatArrayOf(fallback, fallback, fallback, fallback)
+      else floatArrayOf(values[0], values[1], values[2], values[3])
+    GLES20.glUniform4fv(terrainStartLoc, 1, corners(TerrainComposition.startHeights(), 0f), 0)
+    GLES20.glUniform4fv(terrainRangeLoc, 1, corners(TerrainComposition.heightRanges(), 40f), 0)
+    GLES20.glUniform1i(terrainModeLoc, if (hasTerrainTexture) 1 else 0)
+    GLES20.glUniform1i(useTextureLoc, 0)
+    for (i in 0 until 4) {
+      GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + i)
+      GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureIds[i])
+      GLES20.glUniform1i(terrainSamplerLocs[i], i)
+    }
     b.position(0); GLES20.glVertexAttribPointer(posLoc, 3, GLES20.GL_FLOAT, false, STRIDE, b)
     b.position(3); GLES20.glVertexAttribPointer(normalLoc, 3, GLES20.GL_FLOAT, false, STRIDE, b)
     b.position(6); GLES20.glVertexAttribPointer(uvLoc, 2, GLES20.GL_FLOAT, false, STRIDE, b)
     GLES20.glEnableVertexAttribArray(posLoc); GLES20.glEnableVertexAttribArray(normalLoc); GLES20.glEnableVertexAttribArray(uvLoc)
     ib.position(0)
     GLES20.glDrawElements(GLES20.GL_TRIANGLES, terrainCount, GLES20.GL_UNSIGNED_SHORT, ib)
+    GLES20.glUniform1i(terrainModeLoc, 0)
+    GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
     drawCount++
   }
   private fun drawWater() {
@@ -496,7 +527,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     val v = compile(GLES20.GL_VERTEX_SHADER, vs); val f = compile(GLES20.GL_FRAGMENT_SHADER, fs); val p = GLES20.glCreateProgram()
     GLES20.glAttachShader(p,v); GLES20.glAttachShader(p,f); GLES20.glLinkProgram(p); val ok = IntArray(1); GLES20.glGetProgramiv(p,GLES20.GL_LINK_STATUS,ok,0); if (ok[0] == 0) throw IllegalStateException(GLES20.glGetProgramInfoLog(p)); GLES20.glDeleteShader(v); GLES20.glDeleteShader(f); return p
   }
-  fun gfxLine(): String = "GFX-DIAG backend=GLES fps=$fps firstFrameMs=$firstFrameLatencyMs surfaceCreated=" + (if (glSurfaceCreated) "si" else "no") + " surfaceChanged=" + (if (glSurfaceChanged) "si" else "no") + " holderValid=" + (if (try { view?.holder?.surface?.isValid == true } catch (_: Throwable) { false }) "si" else "no") + " shown=" + (if (try { view?.isShown == true } catch (_: Throwable) { false }) "si" else "no") + " obj=$sceneObjects meshRef=$meshReferences meshReady=$meshObjects tex=" + texturedObjects + " terrainTex=" + (if (terrainTextureUuid.isNotEmpty()) terrainTextureUuid.take(8) else "-") + " cacheGPU=" + glTextures.size + " draws=$drawCount terrain=" + TerrainMesh.patchesGot() + "/256 water=" + (if (DRAW_WATER_SURFACE) "on" else "off") + " frameAgeMs=" + frameAgeMs() + " startOk=" + (if (startOk) "si" else "no") + " fase=$lastFase initErr=" + (initError ?: "-") + " eye=" + "%.1f,%.1f,%.1f".format(targetX + cos(orbitYaw)*orbitDistance, targetY + sin(orbitPitch)*orbitDistance, targetZ + sin(orbitYaw)*orbitDistance) + " target=" + "%.1f,%.1f,%.1f".format(targetX,targetY,targetZ) + " " + TerrainComposition.status() + " " + ImageAssets.status() + " " + MeshAssets.status()
+  fun gfxLine(): String = "GFX-DIAG backend=GLES fps=$fps firstFrameMs=$firstFrameLatencyMs surfaceCreated=" + (if (glSurfaceCreated) "si" else "no") + " surfaceChanged=" + (if (glSurfaceChanged) "si" else "no") + " holderValid=" + (if (try { view?.holder?.surface?.isValid == true } catch (_: Throwable) { false }) "si" else "no") + " shown=" + (if (try { view?.isShown == true } catch (_: Throwable) { false }) "si" else "no") + " obj=$sceneObjects meshRef=$meshReferences meshReady=$meshObjects tex=" + texturedObjects + " terrainTex=" + (if (terrainTextureUuid.isNotEmpty()) terrainTextureUuid.take(8) else "-") + " terrainGpu=$terrainGpuTextures" + " cacheGPU=" + glTextures.size + " draws=$drawCount terrain=" + TerrainMesh.patchesGot() + "/256 water=" + (if (DRAW_WATER_SURFACE) "on" else "off") + " frameAgeMs=" + frameAgeMs() + " startOk=" + (if (startOk) "si" else "no") + " fase=$lastFase initErr=" + (initError ?: "-") + " eye=" + "%.1f,%.1f,%.1f".format(targetX + cos(orbitYaw)*orbitDistance, targetY + sin(orbitPitch)*orbitDistance, targetZ + sin(orbitYaw)*orbitDistance) + " target=" + "%.1f,%.1f,%.1f".format(targetX,targetY,targetZ) + " " + TerrainComposition.status() + " " + ImageAssets.status() + " " + MeshAssets.status()
   fun sunState(): String = "WORLD-SCENE backend=GLES mesh=procedural terrainPatches=" + TerrainMesh.patchesGot()
   fun projectLabel(fx: Double, fy: Double, fz: Double): Pair<Float,Float>? = null
   fun frameAgeMs(): Long = if (lastFrame > 0L) (SystemClock.elapsedRealtime() - lastFrame).coerceAtLeast(0L) else -1L
@@ -516,12 +547,40 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     private const val MAX_OBJECTS = 2048
     private const val NULL_TEXTURE_UUID = "00000000-0000-0000-0000-000000000000"
     private const val VERTEX = """
-      attribute vec3 aPosition; attribute vec3 aNormal; attribute vec2 aUv; uniform mat4 uMvp; varying vec3 vNormal; varying vec2 vUv;
-      void main(){ gl_Position=uMvp*vec4(aPosition,1.0); vNormal=aNormal; vUv=vec2(aUv.x,1.0-aUv.y); }
+      attribute vec3 aPosition; attribute vec3 aNormal; attribute vec2 aUv; uniform mat4 uMvp; varying vec3 vNormal; varying vec2 vUv; varying vec3 vTerrainPos;
+      void main(){ gl_Position=uMvp*vec4(aPosition,1.0); vNormal=aNormal; vUv=vec2(aUv.x,1.0-aUv.y); vTerrainPos=aPosition; }
     """
     private const val FRAGMENT = """
-      precision mediump float; uniform vec4 uColor; uniform vec4 uUvTransform; uniform float uUvRotation; uniform sampler2D uTexture; uniform int uUseTexture; varying vec3 vNormal; varying vec2 vUv;
-      void main(){ vec3 n=normalize(vNormal); float l=0.38+0.62*max(dot(n,normalize(vec3(-0.35,0.88,0.28))),0.0); vec2 p=(vUv-vec2(0.5))*uUvTransform.xy; float c=cos(uUvRotation); float s=sin(uUvRotation); p=mat2(c,s,-s,c)*p+vec2(0.5)+uUvTransform.zw; vec4 base=uUseTexture==1?texture2D(uTexture,p)*uColor:uColor; gl_FragColor=vec4(base.rgb*l,base.a); }
+      precision mediump float;
+      uniform vec4 uColor; uniform vec4 uUvTransform; uniform float uUvRotation;
+      uniform sampler2D uTexture; uniform int uUseTexture; uniform int uTerrainMode;
+      uniform sampler2D uTerrain0; uniform sampler2D uTerrain1; uniform sampler2D uTerrain2; uniform sampler2D uTerrain3;
+      uniform vec4 uTerrainStart; uniform vec4 uTerrainRange;
+      varying vec3 vNormal; varying vec2 vUv; varying vec3 vTerrainPos;
+      void main(){
+        vec3 n=normalize(vNormal);
+        float l=0.38+0.62*max(dot(n,normalize(vec3(-0.35,0.88,0.28))),0.0);
+        vec4 base;
+        if(uTerrainMode==1){
+          float x=clamp((vTerrainPos.x+128.0)/256.0,0.0,1.0);
+          float y=clamp((128.0-vTerrainPos.z)/256.0,0.0,1.0);
+          float sh=mix(mix(uTerrainStart.x,uTerrainStart.y,x),mix(uTerrainStart.z,uTerrainStart.w,x),y);
+          float hr=mix(mix(uTerrainRange.x,uTerrainRange.y,x),mix(uTerrainRange.z,uTerrainRange.w,x),y);
+          float layer=clamp((vTerrainPos.y-sh)*4.0/max(hr,0.01),0.0,3.0);
+          vec4 t0=texture2D(uTerrain0,vUv); vec4 t1=texture2D(uTerrain1,vUv);
+          vec4 t2=texture2D(uTerrain2,vUv); vec4 t3=texture2D(uTerrain3,vUv);
+          if(layer<1.0) base=mix(t0,t1,layer);
+          else if(layer<2.0) base=mix(t1,t2,layer-1.0);
+          else base=mix(t2,t3,layer-2.0);
+          base*=uColor;
+        } else {
+          vec2 p=(vUv-vec2(0.5))*uUvTransform.xy;
+          float c=cos(uUvRotation); float s=sin(uUvRotation);
+          p=mat2(c,s,-s,c)*p+vec2(0.5)+uUvTransform.zw;
+          base=uUseTexture==1?texture2D(uTexture,p)*uColor:uColor;
+        }
+        gl_FragColor=vec4(base.rgb*l,base.a);
+      }
     """
   }
 }
