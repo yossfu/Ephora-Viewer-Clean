@@ -30,6 +30,15 @@ object AgentLoop {
   @Volatile var throttleLastMs = 0L
   @Volatile var throttleSentN = 0L
   @Volatile var throttleLastTag = "-"
+  @Volatile var camVec = floatArrayOf(128f, 128f, 25f, 0f, 1f, 0f, -1f, 0f, 0f, 0f, 0f, 1f)
+  fun camReport(): String {
+    try {
+      val v = camVec
+      return "centro=%.1f,%.1f,%.1f".format(v[0], v[1], v[2]) + " at=%.2f,%.2f,%.2f".format(v[3], v[4], v[5])
+    } catch(_: Throwable) {
+      return "camReport-error"
+    }
+  }
   fun sendThrottle(tag: String) {
     try {
       val s = LoginManager.Session
@@ -762,7 +771,8 @@ object AgentLoop {
           if (now - lastAuSend >= 100L) {
             lastAuSend = now
           try {
-            val b = UdpCircuit.agentUpdate(s.agentId, s.sessionId, f, px.toFloat(), py.toFloat(), pz.toFloat())
+            val cv = camVec
+            val b = UdpCircuit.agentUpdate(s.agentId, s.sessionId, f, cv[0], cv[1], cv[2], 256f, cv[3], cv[4], cv[5], cv[6], cv[7], cv[8], cv[9], cv[10], cv[11])
             sock.send(DatagramPacket(b, b.size, addr, s.simPort))
             tx++
             val hx = UdpCircuit.txHex("AgentUpdate", UdpCircuit.lastSeq(), b)

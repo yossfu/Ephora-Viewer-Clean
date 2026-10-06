@@ -386,7 +386,7 @@ object UdpCircuit {
     p.putFloat(0f); p.putFloat(1f); p.putFloat(0f)
     return h + p.array()
   }
-  fun agentUpdate(agentId: String, sessionId: String, controlFlags: Int = 0, cx: Float = 128f, cy: Float = 128f, cz: Float = 25f, far: Float = 256f): ByteArray {
+  fun agentUpdate(agentId: String, sessionId: String, controlFlags: Int = 0, cx: Float = 128f, cy: Float = 128f, cz: Float = 25f, far: Float = 256f, ax: Float = 0f, ay: Float = 1f, az: Float = 0f, lx: Float = -1f, ly: Float = 0f, lz: Float = 0f, ux: Float = 0f, uy: Float = 0f, uz: Float = 1f): ByteArray {
     val h = ByteBuffer.allocate(6).order(ByteOrder.BIG_ENDIAN)
     h.put(0x00.toByte())
     h.putInt(seq++)
@@ -401,9 +401,9 @@ object UdpCircuit {
     repeat(3) { p.putFloat(0f) }
     p.put(0x00.toByte())
     p.putFloat(cx); p.putFloat(cy); p.putFloat(cz)
-    p.putFloat(0f); p.putFloat(1f); p.putFloat(0f)
-    p.putFloat(-1f); p.putFloat(0f); p.putFloat(0f)
-    p.putFloat(0f); p.putFloat(0f); p.putFloat(1f)
+    p.putFloat(ax); p.putFloat(ay); p.putFloat(az)
+    p.putFloat(lx); p.putFloat(ly); p.putFloat(lz)
+    p.putFloat(ux); p.putFloat(uy); p.putFloat(uz)
     p.putFloat(far)
     p.putInt(controlFlags)
     p.put(0x00.toByte())

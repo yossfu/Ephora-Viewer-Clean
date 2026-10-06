@@ -239,6 +239,33 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       val eyeY = targetY + sp * orbitDistance
       val eyeZ = targetZ + sin(orbitYaw) * cp * orbitDistance
       Matrix.setLookAtM(camera, 0, eyeX.toFloat(), eyeY.toFloat(), eyeZ.toFloat(), targetX.toFloat(), targetY.toFloat(), targetZ.toFloat(), 0f, 1f, 0f)
+      val slEx = eyeX + 128.0
+      val slEy = -eyeZ + 128.0
+      val slEz = eyeY
+      val slTx = targetX + 128.0
+      val slTy = -targetZ + 128.0
+      val slTz = targetY
+      var cax = slTx - slEx
+      var cay = slTy - slEy
+      var caz = slTz - slEz
+      var cal = Math.sqrt(cax * cax + cay * cay + caz * caz)
+      if (cal < 1e-6) cal = 1.0
+      cax /= cal
+      cay /= cal
+      caz /= cal
+      var crx = cay
+      var cry = -cax
+      var crz = 0.0
+      var crl = Math.sqrt(crx * crx + cry * cry)
+      if (crl < 1e-6) crx = 1.0
+      if (crl < 1e-6) cry = 0.0
+      if (crl < 1e-6) crl = 1.0
+      crx /= crl
+      cry /= crl
+      val cux = cry * caz - crz * cay
+      val cuy = crz * cax - crx * caz
+      val cuz = crx * cay - cry * cax
+      try { AgentLoop.camVec = floatArrayOf(slEx.toFloat(), slEy.toFloat(), slEz.toFloat(), cax.toFloat(), cay.toFloat(), caz.toFloat(), (-crx).toFloat(), (-cry).toFloat(), (-crz).toFloat(), cux.toFloat(), cuy.toFloat(), cuz.toFloat()) } catch(_: Throwable) {}
       Matrix.multiplyMM(vp, 0, projection, 0, camera, 0)
       drawCount = 0
       PrimShapes.budget = 6

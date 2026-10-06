@@ -17,11 +17,15 @@ object PrimDecoder {
   var nLenMalo = 0L
   var nEscMala = 0L
   var nZeroFix = 0L
+  var nAnsweredReq = 0L
+  var nFullNoRec = 0L
+  var nEvict = 0L
   var nTerseQ = 0L
   var nTerseF = 0L
   var nTerseCap = 0L
   var nFullCap = 0L
   private val censoTerse = LinkedHashSet<Long>()
+  private val censoComp = LinkedHashSet<Long>()
   private val censoFull = LinkedHashSet<Long>()
   private val censoCached = LinkedHashSet<Long>()
   private val censoAttach = LinkedHashSet<Long>()
@@ -36,7 +40,7 @@ object PrimDecoder {
     try { synchronized(recs) { if (set.size < 20000) set.add(id) } } catch (_: Throwable) {}
   }
   fun censoLine(): String {
-    return "CENSO terse=" + censoTerse.size + " full=" + censoFull.size + " cached=" + censoCached.size + " attach=" + censoAttach.size + " recs=" + count() + " capT=" + nTerseCap + " capF=" + nFullCap
+    return "CENSO terse=" + censoTerse.size + " comp=" + censoComp.size + " full=" + censoFull.size + " cached=" + censoCached.size + " attach=" + censoAttach.size + " recs=" + count() + " capT=" + nTerseCap + " capF=" + nFullCap
   }
   fun tiposLine(): String {
     try {
@@ -82,11 +86,15 @@ object PrimDecoder {
     nLenMalo = 0L
     nEscMala = 0L
     nZeroFix = 0L
+    nAnsweredReq = 0L
+    nFullNoRec = 0L
+    nEvict = 0L
     nTerseQ = 0L
     nTerseF = 0L
     nTerseCap = 0L
     nFullCap = 0L
     try { synchronized(recs) { censoTerse.clear() } } catch(_: Throwable) {}
+    try { synchronized(recs) { censoComp.clear() } } catch(_: Throwable) {}
     try { synchronized(recs) { censoFull.clear() } } catch(_: Throwable) {}
     try { synchronized(recs) { censoCached.clear() } } catch(_: Throwable) {}
     try { synchronized(recs) { censoAttach.clear() } } catch(_: Throwable) {}
@@ -294,6 +302,9 @@ object PrimDecoder {
   @Volatile var recsLast = 0
   fun pubLine(): String {
     return "PUB pub=" + pubLast + " recs=" + recsLast
+  }
+  fun respLine(): String {
+    return "REQ-RESP pedidas=" + nReqMultSent + " contestadas=" + nAnsweredReq + " fullSinRec=" + nFullNoRec + " evict=" + nEvict
   }
   fun estadoFijo(): String {
     val a = try { estadoLatch } catch(_: Throwable) { "" }
@@ -706,6 +717,7 @@ object PrimDecoder {
           val z = bb.getFloat(48).toDouble()
           val yw = yawVec(bb.getFloat(52), bb.getFloat(56), bb.getFloat(60))
           put(id, pcode, x, y, z, sx, sy, sz, yw, now, blk[26].toInt() and 0xFF)
+          try { censoAdd(censoComp, id) } catch(_: Throwable) {}
         } else {
           try { nLenMalo++ } catch(_: Throwable) {}
         }
@@ -880,6 +892,8 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
           synchronized(recs) { recs[id]?.let { it.meshId = meshId ?: "" } }
           if (meshId != null) { meshIds++; meshParamLast = meshId; MeshAssets.request(meshId) }
         } catch(_: Throwable) {}
+        try { synchronized(recs) { if (reqMultDone.contains(id)) nAnsweredReq++ } } catch(_: Throwable) {}
+        try { synchronized(recs) { if (!recs.containsKey(id)) nFullNoRec++ } } catch(_: Throwable) {}
         o += 66
         try { stashFullMu("ok", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}
         got += 1
@@ -1162,7 +1176,10 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
           var i = 0
           for (r in sorted) {
             i += 1
-            if (i > 600) recs.remove(r.id)
+            if (i > 600) {
+              try { recs.remove(r.id) } catch(_: Throwable) {}
+              try { nEvict++ } catch(_: Throwable) {}
+            }
           }
         }
         val pub = sorted.take(256).map { r -> r.copy() }
