@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 
 /** Reassembles the simulator's ImageData/ImagePacket stream and turns JPEG2000 into GLES-ready pixels. */
 object ImageAssets {
+  private const val J2C_IMAGE_CODEC = 2
   private const val MAX_COMPRESSED = 16 * 1024 * 1024
   private const val MAX_BITMAPS = 48
   private const val MAX_PENDING = 32
@@ -111,7 +112,7 @@ object ImageAssets {
     synchronized(this) { if (!decoding.add(uuid)) return }
     scope.launch {
       try {
-        if (codec != 0) throw IllegalArgumentException("codec=$codec")
+        if (codec != J2C_IMAGE_CODEC) throw IllegalArgumentException("codec=$codec")
         val raw = J2kDecoder.decodeNative(compressed) ?: throw IllegalStateException("OpenJPEG-rechazo-J2C")
         if (raw.size < 8) throw IllegalStateException("salida-corta")
         val bb = ByteBuffer.wrap(raw).order(ByteOrder.LITTLE_ENDIAN)

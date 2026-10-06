@@ -36,10 +36,12 @@ class MainActivity : ComponentActivity() {
   var refreshUi: (() -> Unit)? = null
   override fun onPause() {
     super.onPause()
+    try { findViewById<GLSurfaceView>(R.id.surface3d)?.onPause() } catch(_: Throwable) {}
     try { if (inWorld) bgTx0 = AgentLoop.tx } catch(_: Throwable) {}
   }
   override fun onResume() {
     super.onResume()
+    try { findViewById<GLSurfaceView>(R.id.surface3d)?.let { it.onResume(); it.requestRender() } } catch(_: Throwable) {}
     try {
       if (inWorld) {
         val ahora = AgentLoop.tx

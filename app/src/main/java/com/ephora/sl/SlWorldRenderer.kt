@@ -79,12 +79,14 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       if (fw > 1 && fh > 1) applyMetrics(fw, fh) else applyMetrics(surface.width, surface.height)
       if (configuredSurface !== surface) {
         surface.setEGLContextClientVersion(2)
-        surface.setEGLConfigChooser(8, 8, 8, 8, 16, 0)
+        surface.setEGLConfigChooser(8, 8, 8, 0, 16, 0)
         surface.preserveEGLContextOnPause = true
         surface.setRenderer(this)
-        surface.renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
         configuredSurface = surface
-      } else surface.onResume()
+      }
+      surface.renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
+      surface.onResume()
+      surface.requestRender()
       surface.setOnTouchListener { _, e -> onTouch(e); true }
       running = true
       startOk = true
