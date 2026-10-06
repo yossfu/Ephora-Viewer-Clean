@@ -225,6 +225,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
             face0?.offsetS ?: o.texOffsetS, face0?.offsetT ?: o.texOffsetT, face0?.rotation ?: o.texRotation)
           if (tex.isNotEmpty() && glTextures.containsKey(tex.lowercase())) texturedObjects++
         }
+      }
       sceneObjects = n
       fpsFrames++
       val now = SystemClock.elapsedRealtime()
