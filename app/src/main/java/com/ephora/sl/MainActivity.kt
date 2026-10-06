@@ -112,7 +112,12 @@ class MainActivity : ComponentActivity() {
     val view3d = findViewById<View>(R.id.view3d)
     val surface3d = findViewById<GLSurfaceView>(R.id.surface3d)
     val btn3dExit = findViewById<Button>(R.id.btn3dExit)
-    var renderer3d: SlWorldRenderer? = null
+    // Register the renderer while the GLSurfaceView is still hidden. If setRenderer()
+    // runs only after revealing this SurfaceView, Android may deliver surfaceCreated
+    // before GLSurfaceView has a GLThread to receive it; a later activity resume then
+    // appears to "fix" the screen by creating a fresh surface.
+    var renderer3d: SlWorldRenderer? = SlWorldRenderer(this@MainActivity)
+    try { renderer3d?.prepare(surface3d) } catch(_: Throwable) {}
     val streamDevId = try { StreamBridge.devId(this@MainActivity) } catch(_: Throwable) { "nodev" }
     fun snap(): StreamBridge.Snap? {
       return try {

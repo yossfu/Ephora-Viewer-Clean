@@ -69,6 +69,8 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var lastTouch = 0L
   private var lastFrame = 0L
   @Volatile private var firstFrameLatencyMs = -1L
+  @Volatile private var glSurfaceCreated = false
+  @Volatile private var glSurfaceChanged = false
   private var openStartedAt = 0L
   private var openGeneration = 0
   private var sceneObjects = 0
@@ -77,6 +79,26 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var texturedObjects = 0
 
   fun applyMetrics(w: Int, h: Int) { width = w.coerceAtLeast(1); height = h.coerceAtLeast(1) }
+
+  /** Register the GL renderer before the hidden SurfaceView is first made visible. */
+  fun prepare(surface: GLSurfaceView): Boolean {
+    return try {
+      view = surface
+      if (configuredSurface !== surface) {
+        surface.setEGLContextClientVersion(2)
+        surface.setEGLConfigChooser(8, 8, 8, 0, 16, 0)
+        surface.preserveEGLContextOnPause = true
+        surface.setRenderer(this)
+        configuredSurface = surface
+      }
+      surface.renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
+      true
+    } catch (e: Throwable) {
+      initError = "prepare " + e.javaClass.simpleName + ":" + (e.message ?: "")
+      lastFase = "prepare-error"
+      false
+    }
+  }
 
   fun start(surface: GLSurfaceView, fw: Int = 0, fh: Int = 0): Boolean {
     return try {
@@ -88,20 +110,14 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       firstFrameLatencyMs = -1L
       running = true
       startOk = true
-      lastFase = "esperando-GLES"
-      if (configuredSurface !== surface) {
-        surface.setEGLContextClientVersion(2)
-        surface.setEGLConfigChooser(8, 8, 8, 0, 16, 0)
-        surface.preserveEGLContextOnPause = true
-        surface.setRenderer(this)
-        configuredSurface = surface
-      }
+      lastFase = if (glSurfaceCreated && glSurfaceChanged) "GLES-preparado" else "esperando-superficie"
+      if (!prepare(surface)) throw IllegalStateException(initError ?: "renderer-prepare")
       surface.renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
       surface.onResume()
       surface.requestRender()
       surface.post {
         if (running) {
-          try { surface.onResume(); surface.requestRender() } catch (_: Throwable) {}
+          try { surface.requestRender() } catch (_: Throwable) {}
           requestFirstFrame(surface, generation, 0)
         }
       }
@@ -116,23 +132,13 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     }
   }
 
-  /** Recovers the first visible frame if Android attached the GL surface after the activity resumed. */
+  /** Keep nudging a newly visible surface while Android completes its first traversal. */
   private fun requestFirstFrame(surface: GLSurfaceView, generation: Int, attempt: Int) {
     if (!running || generation != openGeneration || firstFrameLatencyMs >= 0L || attempt >= 16) return
     try {
-      if (attempt == 6) {
-        // Mirror one lifecycle refresh automatically; users should not have to background the app.
-        surface.onPause()
-        surface.postDelayed({
-          if (running && generation == openGeneration && firstFrameLatencyMs < 0L) {
-            try { surface.onResume(); surface.requestRender() } catch (_: Throwable) {}
-            requestFirstFrame(surface, generation, attempt + 1)
-          }
-        }, 100L)
-      } else {
-        surface.requestRender()
-        surface.postDelayed({ requestFirstFrame(surface, generation, attempt + 1) }, 150L)
-      }
+      if (!surface.holder.surface.isValid || !surface.isShown) lastFase = "esperando-superficie"
+      surface.requestRender()
+      surface.postDelayed({ requestFirstFrame(surface, generation, attempt + 1) }, 150L)
     } catch (_: Throwable) {}
   }
 
@@ -192,7 +198,9 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       cylinder = makeCylinder()
       waterPlane = makeWaterPlane()
       terrainVersion = -1L
-      lastFase = "GLES-ok"
+      glSurfaceCreated = true
+      glSurfaceChanged = false
+      lastFase = "GLES-contexto"
     } catch (e: Throwable) {
       initError = "GLES " + e.javaClass.simpleName + ":" + (e.message ?: "")
       lastFase = "GLES-error"
@@ -203,6 +211,8 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     width = w.coerceAtLeast(1); height = h.coerceAtLeast(1)
     GLES20.glViewport(0, 0, width, height)
     Matrix.perspectiveM(projection, 0, 54f, width.toFloat() / height.toFloat(), 0.1f, 1800f)
+    glSurfaceChanged = true
+    lastFase = "GLES-superficie-${width}x$height"
   }
 
   override fun onDrawFrame(gl: GL10?) {
@@ -285,7 +295,10 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       if (fpsT0 == 0L) fpsT0 = now
       if (now - fpsT0 >= 3000L) { fps = (fpsFrames * 1000L / (now - fpsT0).coerceAtLeast(1L)).toInt(); fpsFrames = 0; fpsT0 = now }
       lastFrame = now
-      if (firstFrameLatencyMs < 0L) firstFrameLatencyMs = (now - openStartedAt).coerceAtLeast(0L)
+      if (firstFrameLatencyMs < 0L) {
+        firstFrameLatencyMs = (now - openStartedAt).coerceAtLeast(0L)
+        lastFase = "GLES-ok"
+      }
       if (now - lastStats >= 5000L) { lastStats = now; try { onStats?.invoke(gfxLine()) } catch (_: Throwable) {} }
     } catch (e: Throwable) {
       initError = "frame " + e.javaClass.simpleName + ":" + (e.message ?: "")
@@ -472,7 +485,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     val v = compile(GLES20.GL_VERTEX_SHADER, vs); val f = compile(GLES20.GL_FRAGMENT_SHADER, fs); val p = GLES20.glCreateProgram()
     GLES20.glAttachShader(p,v); GLES20.glAttachShader(p,f); GLES20.glLinkProgram(p); val ok = IntArray(1); GLES20.glGetProgramiv(p,GLES20.GL_LINK_STATUS,ok,0); if (ok[0] == 0) throw IllegalStateException(GLES20.glGetProgramInfoLog(p)); GLES20.glDeleteShader(v); GLES20.glDeleteShader(f); return p
   }
-  fun gfxLine(): String = "GFX-DIAG backend=GLES fps=$fps firstFrameMs=$firstFrameLatencyMs obj=$sceneObjects meshReady=$meshObjects tex=" + texturedObjects + " cacheGPU=" + glTextures.size + " draws=$drawCount terrain=" + TerrainMesh.patchesGot() + "/256 water=" + (if (DRAW_WATER_SURFACE) "on" else "off") + " frameAgeMs=" + frameAgeMs() + " startOk=" + (if (startOk) "si" else "no") + " fase=$lastFase initErr=" + (initError ?: "-") + " eye=" + "%.1f,%.1f,%.1f".format(targetX + cos(orbitYaw)*orbitDistance, targetY + sin(orbitPitch)*orbitDistance, targetZ + sin(orbitYaw)*orbitDistance) + " target=" + "%.1f,%.1f,%.1f".format(targetX,targetY,targetZ) + " " + ImageAssets.status() + " " + MeshAssets.status()
+  fun gfxLine(): String = "GFX-DIAG backend=GLES fps=$fps firstFrameMs=$firstFrameLatencyMs surfaceCreated=" + (if (glSurfaceCreated) "si" else "no") + " surfaceChanged=" + (if (glSurfaceChanged) "si" else "no") + " holderValid=" + (if (try { view?.holder?.surface?.isValid == true } catch (_: Throwable) { false }) "si" else "no") + " shown=" + (if (try { view?.isShown == true } catch (_: Throwable) { false }) "si" else "no") + " obj=$sceneObjects meshReady=$meshObjects tex=" + texturedObjects + " cacheGPU=" + glTextures.size + " draws=$drawCount terrain=" + TerrainMesh.patchesGot() + "/256 water=" + (if (DRAW_WATER_SURFACE) "on" else "off") + " frameAgeMs=" + frameAgeMs() + " startOk=" + (if (startOk) "si" else "no") + " fase=$lastFase initErr=" + (initError ?: "-") + " eye=" + "%.1f,%.1f,%.1f".format(targetX + cos(orbitYaw)*orbitDistance, targetY + sin(orbitPitch)*orbitDistance, targetZ + sin(orbitYaw)*orbitDistance) + " target=" + "%.1f,%.1f,%.1f".format(targetX,targetY,targetZ) + " " + ImageAssets.status() + " " + MeshAssets.status()
   fun sunState(): String = "WORLD-SCENE backend=GLES mesh=procedural terrainPatches=" + TerrainMesh.patchesGot()
   fun projectLabel(fx: Double, fy: Double, fz: Double): Pair<Float,Float>? = null
   fun frameAgeMs(): Long = if (lastFrame > 0L) (SystemClock.elapsedRealtime() - lastFrame).coerceAtLeast(0L) else -1L
