@@ -19,6 +19,37 @@ object PrimDecoder {
   var nZeroFix = 0L
   var nTerseQ = 0L
   var nTerseF = 0L
+  var nTerseCap = 0L
+  var nFullCap = 0L
+  private val censoTerse = LinkedHashSet<Long>()
+  private val censoFull = LinkedHashSet<Long>()
+  private val censoCached = LinkedHashSet<Long>()
+  private val censoAttach = LinkedHashSet<Long>()
+  private fun censoAdd(set: LinkedHashSet<Long>, id: Long) {
+    try { synchronized(recs) { if (set.size < 20000) set.add(id) } } catch (_: Throwable) {}
+  }
+  fun censoLine(): String {
+    return "CENSO terse=" + censoTerse.size + " full=" + censoFull.size + " cached=" + censoCached.size + " attach=" + censoAttach.size + " recs=" + count() + " capT=" + nTerseCap + " capF=" + nFullCap
+  }
+  fun tiposLine(): String {
+    try {
+      var mesh = 0
+      var simple = 0
+      var avatar = 0
+      var sintipo = 0
+      var conTex = 0
+      synchronized(recs) {
+        for (r in recs.values) {
+          if (r.tipo == 47) avatar += 1
+          else if (r.meshId.isNotEmpty()) mesh += 1
+          else if (r.tipo == -1) sintipo += 1
+          else simple += 1
+          if (r.tex.isNotEmpty()) conTex += 1
+        }
+      }
+      return "TIPOS mesh=" + mesh + " simple=" + simple + " sintipo=" + sintipo + " avatar=" + avatar + " conTex=" + conTex
+    } catch (_: Throwable) { return "TIPOS error" }
+  }
   @Volatile var meshExtraBlocks = 0L
   @Volatile var meshParams = 0L
   @Volatile var meshIds = 0L
@@ -46,6 +77,12 @@ object PrimDecoder {
     nZeroFix = 0L
     nTerseQ = 0L
     nTerseF = 0L
+    nTerseCap = 0L
+    nFullCap = 0L
+    try { synchronized(recs) { censoTerse.clear() } } catch(_: Throwable) {}
+    try { synchronized(recs) { censoFull.clear() } } catch(_: Throwable) {}
+    try { synchronized(recs) { censoCached.clear() } } catch(_: Throwable) {}
+    try { synchronized(recs) { censoAttach.clear() } } catch(_: Throwable) {}
     meshExtraBlocks = 0L
     meshParams = 0L
     meshIds = 0L
@@ -355,6 +392,7 @@ object PrimDecoder {
       if (!z.isFinite()) { try { lastPutReject = "no-finito-z id=" + id } catch(_: Throwable) {}; return }
       if (x > -10.0 && x < 10.0 && y > -10.0 && y < 10.0 && z > -200.0 && z < 2000.0) {
         try { nAttach++ } catch(_: Throwable) {}
+        try { censoAdd(censoAttach, id) } catch(_: Throwable) {}
         try { lastPutReject = "attach id=" + id } catch(_: Throwable) {}
         try { if (attachArmed && attachMuestra == null) { attachMuestra = "ATTACH-MUESTRA id=" + id + " xyz=" + x + "," + y + "," + z + " t=" + tipo; attachArmed = false } } catch(_: Throwable) {}
         return
@@ -483,6 +521,7 @@ object PrimDecoder {
       if (count <= 0) return 0
       var got = 0
       var guard = count.coerceAtMost(256)
+      try { if (count > 256) nTerseCap += (count - 256).toLong() } catch (_: Throwable) {}
       while (guard > 0) {
         guard -= 1
         if (o + 1 > p.size) break
@@ -522,6 +561,7 @@ object PrimDecoder {
           val z = u16f(u16at(blk, qb + 4), zlo, zhi).toDouble()
           try { nTerseQ++ } catch(_: Throwable) {}
           stashFirst(got, id, x, y, z)
+          try { censoAdd(censoTerse, id) } catch (_: Throwable) {}
           put(id, if (qav) 47 else -1, x, y, z, Float.NaN, Float.NaN, Float.NaN, Float.NaN, now)
         } else if (av == 1) {
           if (len >= 34) {
@@ -537,6 +577,7 @@ object PrimDecoder {
               yw = yawQuat(qx, qy, qz, qw)
             }
             stashFirst(got, id, x, y, z)
+            try { censoAdd(censoTerse, id) } catch (_: Throwable) {}
             put(id, 47, x, y, z, Float.NaN, Float.NaN, Float.NaN, yw, now)
             try { nTerseF++ } catch(_: Throwable) {}
           }
@@ -554,6 +595,7 @@ object PrimDecoder {
               yw = yawQuat(qx, qy, qz, qw)
             }
             stashFirst(got, id, x, y, z)
+            try { censoAdd(censoTerse, id) } catch (_: Throwable) {}
             put(id, -1, x, y, z, Float.NaN, Float.NaN, Float.NaN, yw, now)
             try { nTerseF++ } catch(_: Throwable) {}
           }
@@ -634,6 +676,7 @@ object PrimDecoder {
       if (count <= 0) return 0
       var got = 0
       var guard = count.coerceAtMost(64)
+      try { if (count > 64) nFullCap += (count - 64).toLong() } catch (_: Throwable) {}
       while (guard > 0) {
         guard -= 1
         var muId = -1L
@@ -719,6 +762,7 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
             } catch(_: Throwable) {}
           }
           try { muIn = "in16=" + ib.getFloat(16).toDouble() + "," + ib.getFloat(20).toDouble() + "," + ib.getFloat(24).toDouble() + " in0=" + ib.getFloat(0).toDouble() + "," + ib.getFloat(4).toDouble() + "," + ib.getFloat(8).toDouble() + " inhex=" + hexPrev(ibc.copyOfRange(0, 32), 32) + " " } catch(_: Throwable) {}
+          try { censoAdd(censoFull, id) } catch (_: Throwable) {}
           put(id, pcode, x, y, z, sx, sy, sz, yw, now, hb[26].toInt() and 0xFF)
         }
         o += ilen
@@ -812,6 +856,11 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
       val count = p[10].toInt() and 0xFF
       if (count <= 0) return 0
       if (11 + count * 12 > p.size) return 0
+      var i = 0
+      while (i < count) {
+        try { censoAdd(censoCached, ByteBuffer.wrap(p, 11 + i * 12, 4).order(ByteOrder.LITTLE_ENDIAN).int.toLong() and 0xFFFFFFFFL) } catch (_: Throwable) {}
+        i += 1
+      }
       return count
     } catch(_: Throwable) { return 0 }
   }
