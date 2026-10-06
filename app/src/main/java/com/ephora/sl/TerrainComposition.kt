@@ -30,11 +30,15 @@ object TerrainComposition {
         p += 16
         return "${h.substring(0,8)}-${h.substring(8,12)}-${h.substring(12,16)}-${h.substring(16,20)}-${h.substring(20,32)}"
       }
-      skip(4) // RegionFlags
-      skip(1) // SimAccess
+      skip(4) // RegionFlags U32
+      skip(1) // SimAccess U8
       val nameLen = readU8()
-      skip(nameLen)
-      skip(4 + 4 + 4 + 16) // EstateID, WaterHeight, BillableFactor, CacheID
+      skip(nameLen) // SimName Variable 1
+      skip(16) // SimOwner LLUUID
+      skip(1) // IsEstateManager BOOL
+      skip(4) // WaterHeight F32
+      skip(4) // BillableFactor F32
+      skip(16) // CacheID LLUUID
       val ids = (0 until 8).map { readUuid() }
       val hs = (0 until 4).map { readF32() }
       val rs = (0 until 4).map { readF32() }

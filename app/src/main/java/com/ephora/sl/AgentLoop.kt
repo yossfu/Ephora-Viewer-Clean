@@ -188,6 +188,7 @@ object AgentLoop {
   val imgReqTry = LinkedHashMap<String,Int>()
   val imgDataOk = LinkedHashSet<String>()
   val imgSeen = LinkedHashSet<String>()
+  val imgNoDb = LinkedHashSet<String>()
   fun imgLista(u: String): Boolean {
     try { if (imgDataOk.contains(u.take(8))) return true } catch (_: Throwable) {}
     try { if (ImageAssets.has(u)) return true } catch (_: Throwable) {}
@@ -201,7 +202,7 @@ object AgentLoop {
     try {
       val ids = TerrainComposition.textureIds().take(4)
       if (ids.isEmpty()) return "TERRAIN-PEND sin-ids"
-      val parts = ids.map { u -> u.take(8) + "=" + (if (ImageAssets.has(u)) "bitmap" else if (imgDataOk.contains(u.take(8))) "ensamblada" else if (imgReqSent.contains(u)) "pedida-r" + (imgReqTry[u] ?: 1) else "nada") }
+      val parts = ids.map { u -> u.take(8) + "=" + (if (ImageAssets.has(u)) "bitmap" else if (imgDataOk.contains(u.take(8))) "ensamblada" else if (imgNoDb.contains(u.take(8))) "no-existe" else if (imgReqSent.contains(u)) "pedida-r" + (imgReqTry[u] ?: 1) else "nada") }
       return "TERRAIN-PEND base=" + TerrainComposition.baseTexture().take(8) + " " + parts.joinToString(" ")
     } catch (_: Throwable) { return "TERRAIN-PEND error" }
   }
@@ -583,7 +584,8 @@ object AgentLoop {
             try {
               val line = UdpCircuit.parseImage(imgMid, d.payload)
               if (line != null) {
-                try { if (line.startsWith("IMAGE-DATA")) imgSeen.add(line.substringAfter("id=").take(8).lowercase()) } catch(_: Throwable) {}
+                try { if (line.startsWith("IMAGE-DATA") && !line.contains("no-en-db")) imgSeen.add(line.substringAfter("id=").take(8).lowercase()) } catch(_: Throwable) {}
+                try { if (line.contains("no-en-db")) imgNoDb.add(line.substringAfter("id=").take(8).lowercase()) } catch(_: Throwable) {}
                 try { if (line.startsWith("IMAGE-DATA") && line.contains("completo=si")) imgDataOk.add(line.substringAfter("id=").take(8).lowercase()) } catch(_: Throwable) {}
                 try { onTick?.invoke(line) } catch(_: Throwable) {}
               }
@@ -625,6 +627,7 @@ object AgentLoop {
     try { imgReqTry.clear() } catch(_: Throwable) {}
     try { imgDataOk.clear() } catch(_: Throwable) {}
     try { imgSeen.clear() } catch(_: Throwable) {}
+    try { imgNoDb.clear() } catch(_: Throwable) {}
     try { imgHexDone.clear() } catch(_: Throwable) {}
     try { sintDone = false } catch(_: Throwable) {}
     try { imgCtrlDone = false } catch(_: Throwable) {}

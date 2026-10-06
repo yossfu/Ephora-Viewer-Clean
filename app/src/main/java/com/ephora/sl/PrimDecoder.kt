@@ -239,6 +239,11 @@ object PrimDecoder {
   @Volatile var estadoLatch = ""
   @Volatile var texEstadoLatch = ""
   @Volatile var attachEstadoLatch = ""
+  @Volatile var pubLast = 0
+  @Volatile var recsLast = 0
+  fun pubLine(): String {
+    return "PUB pub=" + pubLast + " recs=" + recsLast
+  }
   fun estadoFijo(): String {
     val a = try { estadoLatch } catch(_: Throwable) { "" }
     val b = try { texEstadoLatch } catch(_: Throwable) { "" }
@@ -978,6 +983,7 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
           if (now - it.next().seen > 300000L) it.remove()
         }
         val all = recs.values.toList()
+        try { recsLast = all.size } catch (_: Throwable) {}
         val sorted = all.sortedBy { r -> (r.x - ax) * (r.x - ax) + (r.y - ay) * (r.y - ay) + (r.z - az) * (r.z - az) }
         if (recs.size > 600) {
           var i = 0
@@ -986,7 +992,9 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
             if (i > 600) recs.remove(r.id)
           }
         }
-        return sorted.take(64).map { r -> r.copy() }
+        val pub = sorted.take(256).map { r -> r.copy() }
+        try { pubLast = pub.size } catch (_: Throwable) {}
+        return pub
       }
     } catch(_: Throwable) { return emptyList() }
   }

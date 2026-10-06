@@ -206,7 +206,7 @@ object MeshAssets {
       .header("Range", "bytes=$start-$end")
       .header("Accept", "*/*")
       .header("Accept-Encoding", "identity")
-      .header("User-Agent", "EPHORASL/7.45 (Android)")
+      .header("User-Agent", "EPHORASL/7.46 (Android)")
       .build()
     client.newCall(request).execute().use { response ->
       if (!response.isSuccessful) throw IllegalStateException("http-${response.code}")
@@ -224,9 +224,20 @@ object MeshAssets {
     val headerReader = LlsdBinary(first.bytes)
     val header = headerReader.read() as? Map<*, *> ?: throw IllegalArgumentException("header-no-es-map")
     val headerSize = headerReader.position
-    val lod = listOf("medium_lod", "high_lod", "low_lod", "lowest_lod")
-      .firstNotNullOfOrNull { name -> (header[name] as? Map<*, *>)?.let { it } }
-      ?: throw IllegalArgumentException("header-sin-lod")
+    val lodNames = listOf("medium_lod", "high_lod", "low_lod", "lowest_lod")
+    val causas = mutableListOf<String>()
+    for (name in lodNames) {
+      val lod = header[name] as? Map<*, *> ?: continue
+      try {
+        return decodeLod(url, first, headerSize, lod)
+      } catch (e: Throwable) {
+        try { causas.add(name.take(6) + ":" + (e.message ?: e.javaClass.simpleName)) } catch (_: Throwable) {}
+      }
+    }
+    if (causas.isEmpty()) throw IllegalArgumentException("header-sin-lod")
+    throw IllegalArgumentException(causas.joinToString(";"))
+  }
+  private fun decodeLod(url: String, first: RangeResult, headerSize: Int, lod: Map<*, *>): Mesh {
     val offset = (lod["offset"] as? Number)?.toLong() ?: throw IllegalArgumentException("lod-offset")
     val size = (lod["size"] as? Number)?.toInt() ?: throw IllegalArgumentException("lod-size")
     require(offset >= 0 && size in 1..MAX_MESH_BYTES) { "lod-rango=$offset/$size" }
