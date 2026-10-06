@@ -664,12 +664,12 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
         if (o < 0) { try { stashFullMu("skG", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
         o = skipVar(p, o, false)
         if (o < 0) { try { stashFullMu("skH", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
-        // TextureEntry = primera V2 = wA (plantilla verificada); interior skip-4 + UUID@4 sigue hipotesis (parse real en 113).
+        // TextureEntry = primera V2 = wA. Su primer campo es el UUID de textura por defecto (16 bytes); skipGet ya quitó el prefijo V2.
         try {
           var best = ByteArray(0)
           try { if (wA.size >= 20) best = wA } catch(_: Throwable) {}
           if (best.size >= 20) {
-            val raw32 = hexPrev(best.copyOfRange(4, 20), 16)
+            val raw32 = hexPrev(best.copyOfRange(0, 16), 16)
             val full = raw32.substring(0, 8) + "-" + raw32.substring(8, 12) + "-" + raw32.substring(12, 16) + "-" + raw32.substring(16, 20) + "-" + raw32.substring(20, 32)
             try { synchronized(recs) { val r = recs[id]; if (r != null && r.tex.isEmpty()) r.tex = full } } catch(_: Throwable) {}
             try { if (texIds.size < 8 && texIds.add(id)) { val tl = "TEX-UUID id=" + id + " u=" + full + " id8=" + full.take(8); try { texEmitTotal++ } catch(_: Throwable) {}; try { texEmitSesion++ } catch(_: Throwable) {}; try { onTexLine?.invoke(tl) } catch(_: Throwable) {} } } catch(_: Throwable) {}

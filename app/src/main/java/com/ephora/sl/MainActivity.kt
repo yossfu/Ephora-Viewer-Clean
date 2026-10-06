@@ -627,6 +627,8 @@ class MainActivity : ComponentActivity() {
       try { opening3d = true } catch(_: Throwable) {}
       try {
         visStash.clear()
+        visStash.add(Pair(mundo, mundo.visibility))
+        mundo.visibility = View.GONE
         for (v in listOf(chatListScroll, convBar, chatScroll, inputRow)) { visStash.add(Pair(v, v.visibility)); v.visibility = View.GONE }
       } catch(_: Throwable) {}
       try { view3d.visibility = View.VISIBLE } catch(_: Throwable) {}
