@@ -54,6 +54,7 @@ object MeshAssets {
   private val scheduled = LinkedHashSet<String>()
   private val visible = LinkedHashSet<String>()
   private val failuresById = HashMap<String, Int>()
+  private val failLast = ArrayDeque<String>()
   private val retryAt = HashMap<String, Long>()
   private val cache = LinkedHashMap<String, Mesh>(32, 0.75f, true)
   private val client = OkHttpClient.Builder()
@@ -77,6 +78,7 @@ object MeshAssets {
       visible.clear()
       failuresById.clear()
       retryAt.clear()
+      try { failLast.clear() } catch(_: Throwable) {}
       cache.clear()
       requested = 0L
       decoded = 0L
@@ -128,6 +130,8 @@ object MeshAssets {
             }
             failed++
             last = "fail:$id ${e.javaClass.simpleName}:${(e.message ?: "").take(80)}"
+            try { failLast.addLast(id.take(8) + ":" + e.javaClass.simpleName) } catch(_: Throwable) {}
+            try { while (failLast.size > 8) failLast.removeFirst() } catch(_: Throwable) {}
           } finally {
             synchronized(lock) { scheduled.remove(id) }
           }
@@ -188,7 +192,7 @@ object MeshAssets {
   fun mesh(id: String): Mesh? = synchronized(lock) { cache[id.lowercase(Locale.US)] }
 
   fun status(): String = synchronized(lock) {
-    "MESH-ASSETS req=$requested decoded=$decoded failed=$failed cache=${cache.size} visible=${visible.size} pending=${scheduled.size} retry=${retryAt.size} last=$last"
+    "MESH-ASSETS req=$requested decoded=$decoded failed=$failed cache=${cache.size} visible=${visible.size} pending=${scheduled.size} retry=${retryAt.size} last=$last failIds=" + failLast.joinToString(",")
   }
 
   private fun isUuid(s: String): Boolean = s.matches(Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"))
@@ -202,7 +206,7 @@ object MeshAssets {
       .header("Range", "bytes=$start-$end")
       .header("Accept", "*/*")
       .header("Accept-Encoding", "identity")
-      .header("User-Agent", "EPHORASL/7.42 (Android)")
+      .header("User-Agent", "EPHORASL/7.43 (Android)")
       .build()
     client.newCall(request).execute().use { response ->
       if (!response.isSuccessful) throw IllegalStateException("http-${response.code}")

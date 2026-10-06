@@ -183,6 +183,7 @@ object AgentLoop {
   val imgReqSent = LinkedHashSet<String>()
   var imgRxCount = 0L
   var rxDescartados = 0L
+  val rxDescPorId = LinkedHashMap<String,Long>()
   val imgReqTime = LinkedHashMap<String,Long>()
   val imgReqTry = LinkedHashMap<String,Int>()
   val imgDataOk = LinkedHashSet<String>()
@@ -253,13 +254,15 @@ object AgentLoop {
       val ad = loopAddr
       if (ad == null) { try { onTick?.invoke("IMAGE-REQ-ERROR sin-destino") } catch(_: Throwable) {}; return false }
       if (s.agentId.isBlank() || s.sessionId.isBlank()) { try { onTick?.invoke("IMAGE-REQ-ERROR sin-sesion") } catch(_: Throwable) {}; return false }
-      val uuids = try { (TerrainComposition.textureIds() + PrimDecoder.texList()).distinct().take(48) } catch(_: Throwable) { emptyList<String>() }
+      val uuids = try { (TerrainComposition.textureIds() + PrimDecoder.texList()).distinct().take(256) } catch(_: Throwable) { emptyList<String>() }
       if (uuids.isEmpty()) {
         try { onTick?.invoke("IMAGE-REQ sin-uuid") } catch(_: Throwable) {}
         return false
       }
       var n = 0
+      var cupo = 24
       for (u in uuids) {
+        try { if (cupo <= 0 && !imgReqSent.contains(u)) break } catch(_: Throwable) {}
         if (imgReqSent.contains(u)) {
           try {
             val last = imgReqTime[u] ?: 0L
@@ -275,11 +278,12 @@ object AgentLoop {
               try { imgReqTry[u] = tries + 1 } catch(_: Throwable) {}
               try { onTick?.invoke("IMAGE-REQ-RETRY id8=" + u.take(8) + " intento=" + (tries + 1) + " seq=" + seq2 + " src=" + src) } catch(_: Throwable) {}
               n++
+              cupo -= 1
             }
           } catch(_: Throwable) {}
           continue
         }
-        if (imgReqSent.size >= 48) break
+        if (imgReqSent.size >= 256) break
         try { java.util.UUID.fromString(u) } catch(_: Throwable) { try { onTick?.invoke("IMAGE-REQ-UUID-MALO u=" + u.take(20)) } catch(_: Throwable) {}; continue }
         val b = UdpCircuit.requestImage(s.agentId, s.sessionId, u)
         val seq = try { ByteBuffer.wrap(b, 1, 4).order(ByteOrder.BIG_ENDIAN).int.toLong() and 0xFFFFFFFFL } catch(_: Throwable) { UdpCircuit.lastSeq() }
@@ -312,7 +316,9 @@ object AgentLoop {
         } catch(_: Throwable) {}
         try { if (imgHexDone.add(u)) onTick?.invoke(UdpCircuit.txHex("RequestImage", seq, b, 64)) } catch(_: Throwable) {}
         n++
+        cupo -= 1
       }
+      try { if (cupo <= 0) onTick?.invoke("IMAGE-REQ-CUPO total=" + uuids.size + " enviadas-esta-vez=" + n) } catch(_: Throwable) {}
       n > 0
     } catch(_: Throwable) { false }
   }
@@ -460,6 +466,25 @@ object AgentLoop {
   var sy = 0.0
   var sz = 0.0
   fun posStr(): String = "%.1f,%.1f,%.1f".format(px, py, pz)
+  fun descTop(): String {
+    try {
+      val top = rxDescPorId.entries.sortedByDescending { it.value }.take(8)
+      if (top.isEmpty()) return "RX-DESC-TOP vacio"
+      return "RX-DESC-TOP " + top.joinToString(" ") { e -> e.key + "=" + e.value }
+    } catch(_: Throwable) { return "RX-DESC-TOP error" }
+  }
+  fun imgPendiente(): String {
+    try {
+      val uuids = try { (TerrainComposition.textureIds() + PrimDecoder.texList()).distinct() } catch(_: Throwable) { emptyList<String>() }
+      var pedidas = 0
+      var ok = 0
+      for (u in uuids) {
+        try { if (imgReqSent.contains(u)) pedidas++ } catch(_: Throwable) {}
+        try { if (imgDataOk.contains(u.take(8))) ok++ } catch(_: Throwable) {}
+      }
+      return "IMAGE-REQ-PEND total=" + uuids.size + " pedidas=" + pedidas + " ok=" + ok + " pendiente=" + (uuids.size - pedidas)
+    } catch(_: Throwable) { return "IMAGE-REQ-PEND error" }
+  }
   fun status(): String = "AU tx=" + tx + (if (running) " vivo" else " parado") + (if (lastTick.isNotBlank()) " " + lastTick else "")
   fun sniff(buf: ByteArray, len: Int) {
     try {
@@ -572,6 +597,7 @@ object AgentLoop {
     running = true
     try { ImageAssets.resetSession() } catch(_: Throwable) {}
     try { imgReqSent.clear() } catch(_: Throwable) {}
+    try { rxDescPorId.clear() } catch(_: Throwable) {}
     try { imgReqTime.clear() } catch(_: Throwable) {}
     try { imgReqTry.clear() } catch(_: Throwable) {}
     try { imgDataOk.clear() } catch(_: Throwable) {}
@@ -684,6 +710,8 @@ object AgentLoop {
                       val uline = ChatManager.unknownLine(rx.name, d.payload)
                       if (uline != null) { try { onTick?.invoke(uline) } catch(_: Throwable) {} }
                       else { try { rxDescartados++ } catch(_: Throwable) {} }
+                      try { rxDescPorId[rx.name] = (rxDescPorId[rx.name] ?: 0L) + 1L } catch(_: Throwable) {}
+                      try { if (rxDescPorId.size > 24) rxDescPorId.remove(rxDescPorId.keys.firstOrNull()) } catch(_: Throwable) {}
                       if (rx.msgId == 0xFFFF00FE.toInt()) { try { onTick?.invoke("IM-CORTO-PREVIO len=" + d.payload.size + " rama=rx-unknown") } catch(_: Throwable) {} }
                     }
                   } catch(_: Throwable) {}

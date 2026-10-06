@@ -119,3 +119,4 @@
 # Historial: v7.41 mundo-negro (M1 SUN-STATE por apertura sol/sky/ent/via-reflexion + surf WxH, sin mover sol; M2 LABEL-ATTACHED reales con safe-cast, fuera hard-cast) + bump 7.41/102. Resto intacto.
 # Regla: log-que-miente = bug (contar reales, no lista) + jamas-cast-de-SurfaceView-a-ViewGroup (safe-cast + parent!=null).
 # Historial: v7.42 visor-F1 (teleport Low 62/63/65 + RX 64/66/69/72/73 + reentry + typing TX + btnTP) + bump 7.42/103. Resto intacto.
+# Historial: v7.43 2026-10-06 mundo-texturas-1: texList 48->256 + RequestImage cupo 24/lista 256 (wiki RequestImage High/ImageData High; el sim solo manda lo pedido) + SIXTY-OFF throttle 10s + FIJO-PRIMS/TEX/ATTACH en reporte + RX-DESC-TOP + IMAGE-REQ-PEND/CUPO + MESH failIds + bump 7.43/111. Congelados intactos.

@@ -79,6 +79,10 @@ object PrimDecoder {
     lastKillId = -1L
     try { hexFam.clear() } catch(_: Throwable) {}
     lastSum = 0L
+    try { estadoLatch = "" } catch(_: Throwable) {}
+    try { texEstadoLatch = "" } catch(_: Throwable) {}
+    try { attachEstadoLatch = "" } catch(_: Throwable) {}
+    try { sixtyLastEmit = 0L } catch(_: Throwable) {}
   }
   fun count(): Int {
     try {
@@ -231,6 +235,21 @@ object PrimDecoder {
   var attachMuestra: String? = null
   private var attachArmed = true
   var sixtyLine: String? = null
+  private var sixtyLastEmit = 0L
+  @Volatile var estadoLatch = ""
+  @Volatile var texEstadoLatch = ""
+  @Volatile var attachEstadoLatch = ""
+  fun estadoFijo(): String {
+    val a = try { estadoLatch } catch(_: Throwable) { "" }
+    val b = try { texEstadoLatch } catch(_: Throwable) { "" }
+    val c = try { attachEstadoLatch } catch(_: Throwable) { "" }
+    var out = ""
+    try { if (a.isNotEmpty()) out += "FIJO-" + a + "\n" } catch(_: Throwable) {}
+    try { if (b.isNotEmpty()) out += "FIJO-" + b + "\n" } catch(_: Throwable) {}
+    try { if (c.isNotEmpty()) out += "FIJO-" + c } catch(_: Throwable) {}
+    try { if (out.isEmpty()) out = "FIJO-sin-estado-aun" } catch(_: Throwable) {}
+    return out.trim()
+  }
   private fun stashSkA(muId: Long, muIlen: Int, muPc: Int, muIn: String, o: Int, size: Int, p: ByteArray) {
     try {
       val rem = size - o
@@ -306,9 +325,9 @@ object PrimDecoder {
           val ids = if (r.texFaces.isEmpty()) listOf(r.tex) else r.texFaces.map { it.uuid }
           for (id in ids) {
             if (id.isNotEmpty() && id != "00000000-0000-0000-0000-000000000000" && !out.contains(id)) out.add(id)
-            if (out.size >= 48) break
+            if (out.size >= 256) break
           }
-          if (out.size >= 48) break
+          if (out.size >= 256) break
         }
       }
       return out
@@ -888,6 +907,8 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
         if (txLine != null) { try { texEmitTotal++ } catch(_: Throwable) {}; return txLine }
         var sxLine: String? = null
         try { sxLine = sixtyLine; sixtyLine = null } catch(_: Throwable) {}
+        try { if (sxLine != null && sxLine.startsWith("SIXTY-OFF") && now - sixtyLastEmit < 10000L) sxLine = null } catch(_: Throwable) {}
+        try { if (sxLine != null && sxLine.startsWith("SIXTY-OFF")) sixtyLastEmit = now } catch(_: Throwable) {}
         if (sxLine != null) return sxLine
         var fxLine: String? = null
         try { if (fullQ.isNotEmpty()) fxLine = fullQ.removeAt(0) } catch(_: Throwable) {}
@@ -896,7 +917,11 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
         try { if (extraQ.isNotEmpty()) exLine = extraQ.removeAt(0) } catch(_: Throwable) {}
         if (exLine == "HISTO") return brHistLine()
         if (exLine == "TERSEN") return terseLine()
-        if (exLine == "ATTN") return "ATTACH-ESTADO attach=" + nAttach
+        if (exLine == "ATTN") {
+          val atEstado = "ATTACH-ESTADO attach=" + nAttach
+          try { attachEstadoLatch = atEstado } catch(_: Throwable) {}
+          return atEstado
+        }
         if (exLine != null) return exLine
         var atLine: String? = null
         try { atLine = attachMuestra; attachMuestra = null } catch(_: Throwable) {}
@@ -926,7 +951,9 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
           var con = 0
           var tot = 0
           synchronized(recs) { for (r in recs.values) { tot += 1; if (r.tex.isNotEmpty()) con += 1 } }
-          return "TEX-ESTADO con=" + con + " sin=" + (tot - con) + " obj=" + tot + " emit=" + texEmitTotal
+          val texLine2 = "TEX-ESTADO con=" + con + " sin=" + (tot - con) + " obj=" + tot + " emit=" + texEmitTotal
+          try { texEstadoLatch = texLine2 } catch(_: Throwable) {}
+          return texLine2
         } catch(_: Throwable) {}
       }
       if (now - lastSum >= 30000L) {
@@ -935,7 +962,9 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
         try { extraQ.add("TERSEN") } catch(_: Throwable) {}
         try { extraQ.add("ATTN") } catch(_: Throwable) {}
         try { attachArmed = true } catch(_: Throwable) {}
-        return "PRIMS-ESTADO terse=" + nTerse + "/" + nObjTerse + "(q=" + nTerseQ + " f=" + nTerseF + ") comp=" + nComp + "/" + nObjComp + " full=" + nFull + "/" + nObjFull + " cached=" + nCached + " kill=" + nKill + "(hit=" + nKillHit + " miss=" + nKillMiss + ") fuera=" + nFueraRango + " lenMalo=" + nLenMalo + " escMala=" + nEscMala + " zeroFix=" + nZeroFix + " obj=" + count() + " FUERA-MUESTRA " + (if (fueraMuestra.isEmpty()) "ninguna" else fueraMuestra)
+        val estLine = "PRIMS-ESTADO terse=" + nTerse + "/" + nObjTerse + "(q=" + nTerseQ + " f=" + nTerseF + ") comp=" + nComp + "/" + nObjComp + " full=" + nFull + "/" + nObjFull + " cached=" + nCached + " kill=" + nKill + "(hit=" + nKillHit + " miss=" + nKillMiss + ") fuera=" + nFueraRango + " lenMalo=" + nLenMalo + " escMala=" + nEscMala + " zeroFix=" + nZeroFix + " obj=" + count() + " FUERA-MUESTRA " + (if (fueraMuestra.isEmpty()) "ninguna" else fueraMuestra)
+        try { estadoLatch = estLine } catch(_: Throwable) {}
+        return estLine
       }
       return null
     } catch(_: Throwable) { return null }
