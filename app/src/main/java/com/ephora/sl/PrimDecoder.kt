@@ -1061,7 +1061,8 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
         val now = System.currentTimeMillis()
         val it = recs.values.iterator()
         while (it.hasNext()) {
-          if (now - it.next().seen > 300000L) it.remove()
+          val r = it.next()
+          if (r.tipo == 47 && now - r.seen > 300000L) it.remove()
         }
         val all = recs.values.toList()
         try { recsLast = all.size } catch (_: Throwable) {}
