@@ -27,7 +27,10 @@ object MeshAssets {
   private const val MAX_HEADER_BYTES = 4096
   private const val MAX_MESH_BYTES = 16 * 1024 * 1024
   private const val MAX_DECOMPRESSED_BYTES = 32 * 1024 * 1024
-  private const val MAX_CACHE_ENTRIES = 12
+  // Keep enough recently-used geometry for the current 47-object region view.
+  // The old 12-entry LRU evicted meshes while the renderer was cycling through
+  // visible objects, so most of them silently fell back to procedural shapes.
+  private const val MAX_CACHE_ENTRIES = 48
   private const val MAX_VERTICES_PER_FACE = 65535
   private const val MAX_EXPANDED_VERTICES = 350000
 
