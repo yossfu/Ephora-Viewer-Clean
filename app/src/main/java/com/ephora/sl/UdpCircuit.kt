@@ -161,6 +161,28 @@ object UdpCircuit {
     bb.put(0x00.toByte())
     return bb.array() + body
   }
+  fun agentThrottle(agentId: String, sessionId: String, circuit: Int): ByteArray {
+    val kbps = floatArrayOf(50f, 70f, 14f, 14f, 136f, 136f, 80f)
+    val p = ByteBuffer.allocate(4 + 16 + 16 + 4 + 4 + 1 + 28).order(ByteOrder.LITTLE_ENDIAN)
+    p.put(0xFF.toByte())
+    p.put(0xFF.toByte())
+    p.put(0x00.toByte())
+    p.put(0x51.toByte())
+    p.order(ByteOrder.BIG_ENDIAN)
+    p.put(uuidBE(agentId))
+    p.put(uuidBE(sessionId))
+    p.order(ByteOrder.LITTLE_ENDIAN)
+    p.putInt(circuit)
+    p.putInt(0)
+    p.put(28.toByte())
+    for (v in kbps) p.putFloat(v * 1024f)
+    val body = zeroEncode(p.array())
+    val bb = ByteBuffer.allocate(6).order(ByteOrder.BIG_ENDIAN)
+    bb.put(0xC0.toByte())
+    bb.putInt(seq++)
+    bb.put(0x00.toByte())
+    return bb.array() + body
+  }
   data class Rx(val flags: Int, val seq: Long, val msgId: Int, val name: String, val ackRx: Int, val raw: ByteArray)
   data class Decoded(val flags: Int, val seq: Long, val msgId: Int, val payload: ByteArray, val ackRx: Int)
   fun msgName(id: Int): String {

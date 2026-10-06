@@ -914,23 +914,32 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
     return null
   }
   fun meshStatus(): String = "MESH-PRIM extra=$meshExtraBlocks params=$meshParams ids=$meshIds last=$meshParamLast"
-  fun drainReqMult(max: Int): List<Long> {
+  fun drainReqMult(max: Int, ax: Double = 0.0, ay: Double = 0.0, az: Double = 0.0): List<Long> {
     try {
       synchronized(recs) {
         val out = ArrayList<Long>(max)
         val nowD = try { System.currentTimeMillis() } catch(_: Throwable) { 0L }
-        val it = reqMultPend.iterator()
-        while (it.hasNext() && out.size < max) {
-          val id = it.next()
-          it.remove()
-          reqMultDone.add(id)
-          try { reqMultTime[id] = nowD } catch(_: Throwable) {}
-          out.add(id)
+        if (reqMultPend.isEmpty()) return out
+        val sorted = reqMultPend.toList().sortedBy { id -> distPend(id, ax, ay, az) }
+        for (id in sorted) {
+          if (out.size >= max) break
+          if (reqMultPend.remove(id)) {
+            reqMultDone.add(id)
+            try { reqMultTime[id] = nowD } catch(_: Throwable) {}
+            out.add(id)
+          }
         }
         try { if (reqMultTime.size > 20000) reqMultTime.keys.firstOrNull()?.let { reqMultTime.remove(it) } } catch(_: Throwable) {}
         return out
       }
     } catch(_: Throwable) { return emptyList() }
+  }
+  private fun distPend(id: Long, ax: Double, ay: Double, az: Double): Double {
+    try {
+      val r = synchronized(recs) { recs[id] }
+      if (r == null) return Double.MAX_VALUE
+      return (r.x - ax) * (r.x - ax) + (r.y - ay) * (r.y - ay) + (r.z - az) * (r.z - az)
+    } catch(_: Throwable) { return Double.MAX_VALUE }
   }
   fun reqMultLine(): String {
     return "REQ-MULT pend=" + (try { synchronized(recs) { reqMultPend.size } } catch(_: Throwable) { -1 }) + " done=" + (try { synchronized(recs) { reqMultDone.size } } catch(_: Throwable) { -1 }) + " sent=" + nReqMultSent + " pk=" + nReqMultPk

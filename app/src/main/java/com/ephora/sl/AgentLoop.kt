@@ -660,7 +660,7 @@ object AgentLoop {
                 val now = System.currentTimeMillis()
                 if (now - lastReqMultT >= 500L) {
                   try { PrimDecoder.sweepTexless(px, py, pz, now) } catch(_: Throwable) {}
-                  val ids = try { PrimDecoder.drainReqMult(96) } catch(_: Throwable) { emptyList<Long>() }
+                  val ids = try { PrimDecoder.drainReqMult(96, px, py, pz) } catch(_: Throwable) { emptyList<Long>() }
                   if (ids.isNotEmpty()) {
                     lastReqMultT = now
                     try {
@@ -719,6 +719,7 @@ object AgentLoop {
         sock.soTimeout = 15
         try { sock.receiveBufferSize = 262144 } catch(_: Throwable) {}
         val addr = loopAddr!!
+        try { val th = UdpCircuit.agentThrottle(s.agentId, s.sessionId, s.circuitCode); sock.send(DatagramPacket(th, th.size, addr, s.simPort)); tx++; onTick?.invoke(UdpCircuit.txHex("AgentThrottle", UdpCircuit.lastSeq(), th) + " preset=500 total=512000Bps") } catch(_: Throwable) {}
         var t0 = System.currentTimeMillis()
         var last = System.currentTimeMillis()
         var lastAuSend = 0L
