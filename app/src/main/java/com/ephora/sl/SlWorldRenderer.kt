@@ -62,8 +62,8 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var targetY = 25.0
   private var targetZ = 0.0
   private var orbitYaw = 0.25
-  private var orbitPitch = 0.28
-  private var orbitDistance = 16.0
+  private var orbitPitch = 0.10
+  private var orbitDistance = 6.0
   private var downX = 0f
   private var downY = 0f
   private var downSpan = 0f

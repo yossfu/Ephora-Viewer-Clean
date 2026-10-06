@@ -659,7 +659,7 @@ object AgentLoop {
               try {
                 val now = System.currentTimeMillis()
                 if (now - lastReqMultT >= 500L) {
-                  try { PrimDecoder.sweepTexless() } catch(_: Throwable) {}
+                  try { PrimDecoder.sweepTexless(px, py, pz, now) } catch(_: Throwable) {}
                   val ids = try { PrimDecoder.drainReqMult(96) } catch(_: Throwable) { emptyList<Long>() }
                   if (ids.isNotEmpty()) {
                     lastReqMultT = now

@@ -27,6 +27,9 @@ object PrimDecoder {
   private val censoAttach = LinkedHashSet<Long>()
   private val reqMultPend = LinkedHashSet<Long>()
   private val reqMultDone = LinkedHashSet<Long>()
+  private val reqMultTime = LinkedHashMap<Long, Long>()
+  var sixtySticky = ""
+  @Volatile var diagLatch = ""
   @Volatile var nReqMultSent = 0L
   @Volatile var nReqMultPk = 0L
   private fun censoAdd(set: LinkedHashSet<Long>, id: Long) {
@@ -89,6 +92,7 @@ object PrimDecoder {
     try { synchronized(recs) { censoAttach.clear() } } catch(_: Throwable) {}
     try { synchronized(recs) { reqMultPend.clear() } } catch(_: Throwable) {}
     try { synchronized(recs) { reqMultDone.clear() } } catch(_: Throwable) {}
+    try { synchronized(recs) { reqMultTime.clear() } } catch(_: Throwable) {}
     nReqMultSent = 0L
     nReqMultPk = 0L
     meshExtraBlocks = 0L
@@ -117,6 +121,7 @@ object PrimDecoder {
     attachMuestra = null
     attachArmed = true
     sixtyLine = null
+    sixtySticky = ""
     try { pendingTexQ.clear() } catch(_: Throwable) {}
     texEmitTotal = 0L
     texEmitSesion = 0L
@@ -128,6 +133,7 @@ object PrimDecoder {
     try { texEstadoLatch = "" } catch(_: Throwable) {}
     try { attachEstadoLatch = "" } catch(_: Throwable) {}
     try { sixtyLastEmit = 0L } catch(_: Throwable) {}
+    try { diagLatch = "" } catch(_: Throwable) {}
   }
   fun count(): Int {
     try {
@@ -293,10 +299,13 @@ object PrimDecoder {
     val a = try { estadoLatch } catch(_: Throwable) { "" }
     val b = try { texEstadoLatch } catch(_: Throwable) { "" }
     val c = try { attachEstadoLatch } catch(_: Throwable) { "" }
+    val d = try { diagLatch } catch(_: Throwable) { "" }
     var out = ""
     try { if (a.isNotEmpty()) out += "FIJO-" + a + "\n" } catch(_: Throwable) {}
     try { if (b.isNotEmpty()) out += "FIJO-" + b + "\n" } catch(_: Throwable) {}
     try { if (c.isNotEmpty()) out += "FIJO-" + c } catch(_: Throwable) {}
+    try { if (d.isNotEmpty() && out.isNotEmpty()) out += "\n" } catch(_: Throwable) {}
+    try { if (d.isNotEmpty()) out += "FIJO-DIAG " + d } catch(_:Throwable) {}
     try { if (out.isEmpty()) out = "FIJO-sin-estado-aun" } catch(_: Throwable) {}
     return out.trim()
   }
@@ -382,7 +391,7 @@ object PrimDecoder {
       return seen.toList()
     } catch(_: Throwable) { return emptyList() }
   }
-  fun sweepTexless(): Int {
+  fun sweepTexless(ax: Double = 0.0, ay: Double = 0.0, az: Double = 0.0, now: Long = 0L): Int {
     try {
       var n = 0
       synchronized(recs) {
@@ -392,6 +401,23 @@ object PrimDecoder {
           if (reqMultDone.contains(r.id)) continue
           if (reqMultPend.size >= 20000) break
           if (reqMultPend.add(r.id)) n++
+        }
+        if (now > 0L && reqMultPend.size < 96) {
+          val cand = ArrayList<Prim>()
+          for (r in recs.values) {
+            if (r.tipo == 47) continue
+            if (r.tex.isNotEmpty() || r.texFaces.isNotEmpty()) continue
+            if (!reqMultDone.contains(r.id)) continue
+            if (reqMultPend.contains(r.id)) continue
+            val t = try { reqMultTime[r.id] ?: 0L } catch(_: Throwable) { 0L }
+            if (now - t < 45000L) continue
+            cand.add(r)
+          }
+          cand.sortBy { r -> (r.x - ax) * (r.x - ax) + (r.y - ay) * (r.y - ay) + (r.z - az) * (r.z - az) }
+          for (r in cand) {
+            if (reqMultPend.size >= 96) break
+            if (reqMultPend.add(r.id)) n++
+          }
         }
       }
       return n
@@ -892,13 +918,16 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
     try {
       synchronized(recs) {
         val out = ArrayList<Long>(max)
+        val nowD = try { System.currentTimeMillis() } catch(_: Throwable) { 0L }
         val it = reqMultPend.iterator()
         while (it.hasNext() && out.size < max) {
           val id = it.next()
           it.remove()
           reqMultDone.add(id)
+          try { reqMultTime[id] = nowD } catch(_: Throwable) {}
           out.add(id)
         }
+        try { if (reqMultTime.size > 20000) reqMultTime.keys.firstOrNull()?.let { reqMultTime.remove(it) } } catch(_: Throwable) {}
         return out
       }
     } catch(_: Throwable) { return emptyList() }
@@ -1023,6 +1052,7 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
         if (txLine != null) { try { texEmitTotal++ } catch(_: Throwable) {}; return txLine }
         var sxLine: String? = null
         try { sxLine = sixtyLine; sixtyLine = null } catch(_: Throwable) {}
+        try { if (sxLine != null) sixtySticky = sxLine } catch(_: Throwable) {}
         try { if (sxLine != null && sxLine.startsWith("SIXTY-OFF") && now - sixtyLastEmit < 10000L) sxLine = null } catch(_: Throwable) {}
         try { if (sxLine != null && sxLine.startsWith("SIXTY-OFF")) sixtyLastEmit = now } catch(_: Throwable) {}
         if (sxLine != null) return sxLine
@@ -1080,10 +1110,32 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
         try { attachArmed = true } catch(_: Throwable) {}
         val estLine = "PRIMS-ESTADO terse=" + nTerse + "/" + nObjTerse + "(q=" + nTerseQ + " f=" + nTerseF + ") comp=" + nComp + "/" + nObjComp + " full=" + nFull + "/" + nObjFull + " cached=" + nCached + " kill=" + nKill + "(hit=" + nKillHit + " miss=" + nKillMiss + ") fuera=" + nFueraRango + " lenMalo=" + nLenMalo + " escMala=" + nEscMala + " zeroFix=" + nZeroFix + " obj=" + count() + " reqMultPend=" + (try { synchronized(recs) { reqMultPend.size } } catch(_: Throwable) { -1 }) + " reqMultSent=" + nReqMultSent + " reqMultPk=" + nReqMultPk + " FUERA-MUESTRA " + (if (fueraMuestra.isEmpty()) "ninguna" else fueraMuestra)
         try { estadoLatch = estLine } catch(_: Throwable) {}
+        try { diagLatch = sixtySticky + " | " + brHistLine() + " | " + shapeLine() } catch(_: Throwable) {}
         return estLine
       }
       return null
     } catch(_: Throwable) { return null }
+  }
+  fun shapeLine(): String {
+    try {
+      var has = 0
+      var tot = 0
+      val hist = LinkedHashMap<Int, Int>()
+      synchronized(recs) {
+        for (r in recs.values) {
+          if (r.tipo == 47) continue
+          tot++
+          if (r.hasShape) has++
+          val k = r.pathCurve
+          try { hist[k] = (hist[k] ?: 0) + 1 } catch(_: Throwable) {}
+        }
+      }
+      var hs = ""
+      for (e in hist.entries.sortedByDescending { it.value }.take(6)) {
+        hs += e.key.toString() + ":" + e.value.toString() + ","
+      }
+      return "SHAPE-N tot=" + tot + " has=" + has + " paths=" + hs
+    } catch(_: Throwable) { return "SHAPE-N error" }
   }
   fun publish(ax: Double, ay: Double, az: Double): List<Prim> {
     try {
