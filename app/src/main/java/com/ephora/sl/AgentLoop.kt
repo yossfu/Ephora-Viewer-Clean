@@ -275,14 +275,14 @@ object AgentLoop {
       val ad = loopAddr
       if (ad == null) { try { onTick?.invoke("IMAGE-REQ-ERROR sin-destino") } catch(_: Throwable) {}; return false }
       if (s.agentId.isBlank() || s.sessionId.isBlank()) { try { onTick?.invoke("IMAGE-REQ-ERROR sin-sesion") } catch(_: Throwable) {}; return false }
-      val uuids = try { (TerrainComposition.textureIds() + PrimDecoder.texList()).distinct().take(256) } catch(_: Throwable) { emptyList<String>() }
+      val uuids = try { (TerrainComposition.textureIds() + PrimDecoder.texList(px, py, pz)).distinct().take(256) } catch(_: Throwable) { emptyList<String>() }
       if (uuids.isEmpty()) {
         try { onTick?.invoke("IMAGE-REQ sin-uuid") } catch(_: Throwable) {}
         return false
       }
       try { ImageAssets.touchIds(uuids.take(96)) } catch(_: Throwable) {}
       var n = 0
-      var cupo = 24
+      var cupo = 96
       for (u in uuids) {
         try { if (cupo <= 0 && !imgReqSent.contains(u)) break } catch(_: Throwable) {}
         if (imgReqSent.contains(u)) {
@@ -522,7 +522,7 @@ object AgentLoop {
   }
   fun imgPendiente(): String {
     try {
-      val uuids = try { (TerrainComposition.textureIds() + PrimDecoder.texList()).distinct() } catch(_: Throwable) { emptyList<String>() }
+      val uuids = try { (TerrainComposition.textureIds() + PrimDecoder.texList(px, py, pz)).distinct() } catch(_: Throwable) { emptyList<String>() }
       var pedidas = 0
       var ok = 0
       var vistas = 0
@@ -659,6 +659,7 @@ object AgentLoop {
               try {
                 val now = System.currentTimeMillis()
                 if (now - lastReqMultT >= 500L) {
+                  try { PrimDecoder.sweepTexless() } catch(_: Throwable) {}
                   val ids = try { PrimDecoder.drainReqMult(96) } catch(_: Throwable) { emptyList<Long>() }
                   if (ids.isNotEmpty()) {
                     lastReqMultT = now
@@ -834,12 +835,12 @@ object AgentLoop {
             try {
               if (loopSock != null && loopAddr != null) {
                 val nowR = System.currentTimeMillis()
-                val go = try { (TerrainComposition.textureIds() + PrimDecoder.texList()).distinct().any { lane -> !imgReqSent.contains(lane) || ((imgReqTry[lane] ?: 1) < 3 && !imgLista(lane) && nowR - (imgReqTime[lane] ?: 0L) > 20000L) } } catch(_: Throwable) { false }
-                try { ImageAssets.touchIds((TerrainComposition.textureIds() + PrimDecoder.texList()).distinct().take(96)) } catch(_: Throwable) {}
+                val go = try { (TerrainComposition.textureIds() + PrimDecoder.texList(px, py, pz)).distinct().any { lane -> !imgReqSent.contains(lane) || ((imgReqTry[lane] ?: 1) < 3 && !imgLista(lane) && nowR - (imgReqTime[lane] ?: 0L) > 20000L) } } catch(_: Throwable) { false }
+                try { ImageAssets.touchIds((TerrainComposition.textureIds() + PrimDecoder.texList(px, py, pz)).distinct().take(96)) } catch(_: Throwable) {}
                 if (go) sendImageReqBody("tick")
                 try {
                   if (imgRxCount == 0L && System.currentTimeMillis() - loopT0 > 90000L) {
-                    val cands = try { PrimDecoder.texList().filter { (imgReqTry[it] ?: 0) >= 3 && !imgUnrelSent.contains(it) } } catch(_: Throwable) { emptyList<String>() }
+                    val cands = try { PrimDecoder.texList(px, py, pz).filter { (imgReqTry[it] ?: 0) >= 3 && !imgUnrelSent.contains(it) } } catch(_: Throwable) { emptyList<String>() }
                     for (u in cands) {
                       try { java.util.UUID.fromString(u) } catch(_: Throwable) { continue }
                       val b = UdpCircuit.requestImageUnrel(s.agentId, s.sessionId, u)

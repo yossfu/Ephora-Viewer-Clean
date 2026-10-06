@@ -367,21 +367,35 @@ object PrimDecoder {
   var texEmitSesion = 0L
   var onTexLine: ((String) -> Unit)? = null
   fun texIdsReset() { try { synchronized(recs) { texIds.clear() } } catch(_: Throwable) {} }
-  fun texList(): List<String> {
+  fun texList(ax: Double = 0.0, ay: Double = 0.0, az: Double = 0.0): List<String> {
     try {
-      val out = mutableListOf<String>()
+      val seen = LinkedHashSet<String>()
       synchronized(recs) {
-        for (r in recs.values) {
+        val sorted = recs.values.sortedBy { r -> (r.x - ax) * (r.x - ax) + (r.y - ay) * (r.y - ay) + (r.z - az) * (r.z - az) }
+        for (r in sorted) {
           val ids = if (r.texFaces.isEmpty()) listOf(r.tex) else r.texFaces.map { it.uuid }
           for (id in ids) {
-            if (id.isNotEmpty() && id != "00000000-0000-0000-0000-000000000000" && !out.contains(id)) out.add(id)
-            if (out.size >= 256) break
+            if (id.isNotEmpty() && id != "00000000-0000-0000-0000-000000000000" && seen.add(id)) { if (seen.size >= 256) return seen.toList() }
           }
-          if (out.size >= 256) break
         }
       }
-      return out
+      return seen.toList()
     } catch(_: Throwable) { return emptyList() }
+  }
+  fun sweepTexless(): Int {
+    try {
+      var n = 0
+      synchronized(recs) {
+        for (r in recs.values) {
+          if (r.tipo == 47) continue
+          if (r.tex.isNotEmpty() || r.texFaces.isNotEmpty()) continue
+          if (reqMultDone.contains(r.id)) continue
+          if (reqMultPend.size >= 20000) break
+          if (reqMultPend.add(r.id)) n++
+        }
+      }
+      return n
+    } catch(_: Throwable) { return 0 }
   }  fun pollTexFull(): String? { try { synchronized(recs) { for (r in recs.values) { if (r.tex.isNotEmpty()) return r.tex } } } catch(_: Throwable) {}; return null }
   private val texIds = LinkedHashSet<Long>()
   private var lastTexSum = 0L
