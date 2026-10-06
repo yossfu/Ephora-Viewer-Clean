@@ -46,6 +46,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var terrainIndices: ShortBuffer? = null
   private var terrainCount = 0
   private var terrainVersion = -1L
+  private var terrainTextureUuid = ""
   private val projection = FloatArray(16)
   private val camera = FloatArray(16)
   private val model = FloatArray(16)
@@ -361,11 +362,15 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private fun drawTerrain() {
     val b = terrain ?: return
     val ib = terrainIndices ?: return
+    terrainTextureUuid = TerrainComposition.baseTexture()
     Matrix.setIdentityM(mvp, 0); Matrix.multiplyMM(mvp, 0, vp, 0, mvp, 0)
     GLES20.glUniformMatrix4fv(mvpLoc, 1, false, mvp, 0)
-    GLES20.glUniform4f(colorLoc, 0.38f, 0.48f, 0.29f, 1f)
-    GLES20.glUniform1i(useTextureLoc, 0)
-    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
+    GLES20.glUniform4f(colorLoc, 1f, 1f, 1f, 1f)
+    GLES20.glUniform4f(uvTransformLoc, 1f, 1f, 0f, 0f)
+    GLES20.glUniform1f(uvRotationLoc, 0f)
+    val terrainTexture = if (terrainTextureUuid.isNotEmpty()) textureFor(terrainTextureUuid) else 0
+    GLES20.glUniform1i(useTextureLoc, if (terrainTexture != 0) 1 else 0)
+    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, terrainTexture)
     b.position(0); GLES20.glVertexAttribPointer(posLoc, 3, GLES20.GL_FLOAT, false, STRIDE, b)
     b.position(3); GLES20.glVertexAttribPointer(normalLoc, 3, GLES20.GL_FLOAT, false, STRIDE, b)
     b.position(6); GLES20.glVertexAttribPointer(uvLoc, 2, GLES20.GL_FLOAT, false, STRIDE, b)
@@ -403,7 +408,9 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       var nx = -hx; var ny = 4f; var nz = hz
       val len = kotlin.math.sqrt(nx * nx + ny * ny + nz * nz).coerceAtLeast(0.001f)
       nx /= len; ny /= len; nz /= len
-      vertices.put(i * TERRAIN_STEP - 128f).put(h).put(-(j * TERRAIN_STEP - 128f)).put(nx).put(ny).put(nz).put(i / 4f).put(j / 4f)
+      // SL terrain detail textures repeat in world space. A 16 m repeat prevents the
+      // severe stretching caused by mapping one 256 m region across a single image.
+      vertices.put(i * TERRAIN_STEP - 128f).put(h).put(-(j * TERRAIN_STEP - 128f)).put(nx).put(ny).put(nz).put(i * TERRAIN_STEP / 16f).put(j * TERRAIN_STEP / 16f)
     }
     vertices.position(0)
     val inds = ByteBuffer.allocateDirect((n - 1) * (n - 1) * 6 * 2).order(ByteOrder.nativeOrder()).asShortBuffer()
@@ -413,6 +420,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     }
     inds.position(0)
     terrain = vertices; terrainIndices = inds; terrainCount = inds.capacity(); terrainVersion = TerrainMesh.version
+    terrainTextureUuid = TerrainComposition.baseTexture()
   }
 
   private fun makeCube(): FloatBuffer {
@@ -485,7 +493,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     val v = compile(GLES20.GL_VERTEX_SHADER, vs); val f = compile(GLES20.GL_FRAGMENT_SHADER, fs); val p = GLES20.glCreateProgram()
     GLES20.glAttachShader(p,v); GLES20.glAttachShader(p,f); GLES20.glLinkProgram(p); val ok = IntArray(1); GLES20.glGetProgramiv(p,GLES20.GL_LINK_STATUS,ok,0); if (ok[0] == 0) throw IllegalStateException(GLES20.glGetProgramInfoLog(p)); GLES20.glDeleteShader(v); GLES20.glDeleteShader(f); return p
   }
-  fun gfxLine(): String = "GFX-DIAG backend=GLES fps=$fps firstFrameMs=$firstFrameLatencyMs surfaceCreated=" + (if (glSurfaceCreated) "si" else "no") + " surfaceChanged=" + (if (glSurfaceChanged) "si" else "no") + " holderValid=" + (if (try { view?.holder?.surface?.isValid == true } catch (_: Throwable) { false }) "si" else "no") + " shown=" + (if (try { view?.isShown == true } catch (_: Throwable) { false }) "si" else "no") + " obj=$sceneObjects meshReady=$meshObjects tex=" + texturedObjects + " cacheGPU=" + glTextures.size + " draws=$drawCount terrain=" + TerrainMesh.patchesGot() + "/256 water=" + (if (DRAW_WATER_SURFACE) "on" else "off") + " frameAgeMs=" + frameAgeMs() + " startOk=" + (if (startOk) "si" else "no") + " fase=$lastFase initErr=" + (initError ?: "-") + " eye=" + "%.1f,%.1f,%.1f".format(targetX + cos(orbitYaw)*orbitDistance, targetY + sin(orbitPitch)*orbitDistance, targetZ + sin(orbitYaw)*orbitDistance) + " target=" + "%.1f,%.1f,%.1f".format(targetX,targetY,targetZ) + " " + ImageAssets.status() + " " + MeshAssets.status()
+  fun gfxLine(): String = "GFX-DIAG backend=GLES fps=$fps firstFrameMs=$firstFrameLatencyMs surfaceCreated=" + (if (glSurfaceCreated) "si" else "no") + " surfaceChanged=" + (if (glSurfaceChanged) "si" else "no") + " holderValid=" + (if (try { view?.holder?.surface?.isValid == true } catch (_: Throwable) { false }) "si" else "no") + " shown=" + (if (try { view?.isShown == true } catch (_: Throwable) { false }) "si" else "no") + " obj=$sceneObjects meshReady=$meshObjects tex=" + texturedObjects + " terrainTex=" + (if (terrainTextureUuid.isNotEmpty()) terrainTextureUuid.take(8) else "-") + " cacheGPU=" + glTextures.size + " draws=$drawCount terrain=" + TerrainMesh.patchesGot() + "/256 water=" + (if (DRAW_WATER_SURFACE) "on" else "off") + " frameAgeMs=" + frameAgeMs() + " startOk=" + (if (startOk) "si" else "no") + " fase=$lastFase initErr=" + (initError ?: "-") + " eye=" + "%.1f,%.1f,%.1f".format(targetX + cos(orbitYaw)*orbitDistance, targetY + sin(orbitPitch)*orbitDistance, targetZ + sin(orbitYaw)*orbitDistance) + " target=" + "%.1f,%.1f,%.1f".format(targetX,targetY,targetZ) + " " + TerrainComposition.status() + " " + ImageAssets.status() + " " + MeshAssets.status()
   fun sunState(): String = "WORLD-SCENE backend=GLES mesh=procedural terrainPatches=" + TerrainMesh.patchesGot()
   fun projectLabel(fx: Double, fy: Double, fz: Double): Pair<Float,Float>? = null
   fun frameAgeMs(): Long = if (lastFrame > 0L) (SystemClock.elapsedRealtime() - lastFrame).coerceAtLeast(0L) else -1L

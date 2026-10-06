@@ -393,7 +393,10 @@ object UdpCircuit {
                 try { send(ackPacket(listOf(rx.seq))); acks++ } catch(_: Throwable) {}
               }
               det.append(tag + ":rx=" + p.length + "b tipoMsg=" + rx.name + " ackRx=" + rx.ackRx + " hex=" + lastHex + " | ")
-              if (rx.msgId == 0xFFFF0094.toInt()) { gotHs = true; gotName = "RegionHandshake" }
+              if (rx.msgId == 0xFFFF0094.toInt()) {
+                gotHs = true; gotName = "RegionHandshake"
+                try { decode(p.data, p.length)?.let { TerrainComposition.accept(it.payload) } } catch(_: Throwable) {}
+              }
             } catch(e: java.net.SocketTimeoutException) { break }
           }
         }

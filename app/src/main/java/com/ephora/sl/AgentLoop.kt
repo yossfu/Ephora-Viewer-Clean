@@ -253,7 +253,7 @@ object AgentLoop {
       val ad = loopAddr
       if (ad == null) { try { onTick?.invoke("IMAGE-REQ-ERROR sin-destino") } catch(_: Throwable) {}; return false }
       if (s.agentId.isBlank() || s.sessionId.isBlank()) { try { onTick?.invoke("IMAGE-REQ-ERROR sin-sesion") } catch(_: Throwable) {}; return false }
-      val uuids = try { PrimDecoder.texList() } catch(_: Throwable) { emptyList<String>() }
+      val uuids = try { (TerrainComposition.textureIds() + PrimDecoder.texList()).distinct().take(48) } catch(_: Throwable) { emptyList<String>() }
       if (uuids.isEmpty()) {
         try { onTick?.invoke("IMAGE-REQ sin-uuid") } catch(_: Throwable) {}
         return false
@@ -473,6 +473,12 @@ object AgentLoop {
         } catch(_: Throwable) {}
       }
       val mid = rx.msgId
+      if (mid == 0xFFFF0094.toInt()) {
+        try {
+          val d = UdpCircuit.decode(buf, len)
+          if (d != null) TerrainComposition.accept(d.payload)?.let { onTick?.invoke(it) }
+        } catch(_: Throwable) {}
+      }
       if (mid == 11) {
         try {
           val d = UdpCircuit.decode(buf, len)
