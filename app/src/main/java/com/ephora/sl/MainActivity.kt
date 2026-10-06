@@ -4,7 +4,7 @@ import android.content.ClipboardManager
 import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
-import android.view.SurfaceView
+import android.opengl.GLSurfaceView
 import android.view.View
 import android.widget.*
 import androidx.activity.ComponentActivity
@@ -108,7 +108,7 @@ class MainActivity : ComponentActivity() {
     val btnChats = findViewById<Button>(R.id.btnChats)
     val btn3d = findViewById<Button>(R.id.btn3d)
     val view3d = findViewById<View>(R.id.view3d)
-    val surface3d = findViewById<SurfaceView>(R.id.surface3d)
+    val surface3d = findViewById<GLSurfaceView>(R.id.surface3d)
     val btn3dExit = findViewById<Button>(R.id.btn3dExit)
     var renderer3d: SlWorldRenderer? = null
     val streamDevId = try { StreamBridge.devId(this@MainActivity) } catch(_: Throwable) { "nodev" }
@@ -130,96 +130,11 @@ class MainActivity : ComponentActivity() {
     fun snapOrBoot(): StreamBridge.Snap? {
       return try { snap() ?: bootSnap() } catch(_: Throwable) { null }
     }
-    var labelViews = mutableListOf<android.widget.TextView>()
-    var labelLastUpd = 0L
-    var labelLastVis = -1
-    fun removeLabels() {
-      try { val vg = view3d as? android.view.ViewGroup; for (tv in labelViews) { try { vg?.removeView(tv) } catch(_: Throwable) {} } } catch(_: Throwable) {}
-      try { labelViews.clear() } catch(_: Throwable) {}
-      try { labelLastVis = -1 } catch(_: Throwable) {}
-    }
-    fun createLabels() {
-      try {
-        removeLabels()
-        val mk = { txt: String, col: Int ->
-          val tv = android.widget.TextView(this@MainActivity)
-          tv.text = txt
-          tv.textSize = 11f
-          tv.setTextColor(col)
-          try { tv.setBackgroundColor(0xAA000000.toInt()) } catch(_: Throwable) {}
-          try { tv.setPadding(6, 2, 6, 2) } catch(_: Throwable) {}
-          tv
-        }
-        try { labelViews.add(mk("YO", 0xFF22D3EE.toInt())) } catch(_: Throwable) {}
-        for (i in 1..5) { try { labelViews.add(mk("AV" + i, 0xFFFFFFFF.toInt())) } catch(_: Throwable) {} }
-        var attached = 0
-        try {
-          val vg = view3d as? android.view.ViewGroup
-          if (vg != null) {
-            for (tv in labelViews) { try { vg.addView(tv); if (tv.parent != null) attached++ } catch(_: Throwable) {} }
-          }
-        } catch(_: Throwable) {}
-        try { lastUdp = (lastUdp + "\nLABEL-ATTACHED n=" + attached + "/" + labelViews.size).takeLast(12000) } catch(_: Throwable) {}
-      } catch(_: Throwable) {}
-    }
-    fun refreshLabels() {
-      try {
-        val now = System.currentTimeMillis()
-        if (now - labelLastUpd < 4000L) return
-        labelLastUpd = now
-        val r = renderer3d ?: return
-        if (labelViews.isEmpty()) return
-        val items = ArrayList<Pair<String,DoubleArray>>()
-        try {
-          val nm = try { ChatManager.ownDisplayName() } catch(_: Throwable) { "" }
-          val ax = try { AgentLoop.px } catch(_: Throwable) { 128.0 }
-          val ay = try { AgentLoop.py } catch(_: Throwable) { 128.0 }
-          val az = try { AgentLoop.pz } catch(_: Throwable) { 25.0 }
-          items.add(Pair(if (nm.isNotBlank()) "YO " + nm.take(20) else "YO", doubleArrayOf(ax - 128.0, az + 2.0, -(ay - 128.0))))
-        } catch(_: Throwable) {}
-        try {
-          val near = try { AgentLoop.nearPos.take(5) } catch(_: Throwable) { emptyList<Triple<Double,Double,Double>>() }
-          var i = 0
-          for (p in near) {
-            i++
-            val d = try { Math.sqrt((p.first - AgentLoop.px) * (p.first - AgentLoop.px) + (p.second - AgentLoop.py) * (p.second - AgentLoop.py)) } catch(_: Throwable) { -1.0 }
-            items.add(Pair("AV" + i + " " + (if (d >= 0) d.toInt().toString() + "m" else "?"), doubleArrayOf(p.first - 128.0, p.third + 2.0, -(p.second - 128.0))))
-          }
-        } catch(_: Throwable) {}
-        val updates = ArrayList<Triple<String,Float,Float>>()
-        for (it in items) {
-          try {
-            val s = try { r.projectLabel(it.second[0], it.second[1], it.second[2]) } catch(_: Throwable) { null }
-            if (s != null) updates.add(Triple(it.first, s.first, s.second))
-          } catch(_: Throwable) {}
-        }
-        try {
-          runOnUiThread {
-            try {
-              var v = 0
-              for (i in labelViews.indices) {
-                val tv = labelViews[i]
-                if (i < updates.size) {
-                  val u = updates[i]
-                  try { tv.text = u.first } catch(_: Throwable) {}
-                  try { tv.x = u.second - 20f } catch(_: Throwable) {}
-                  try { tv.y = u.third - 34f } catch(_:Throwable) {}
-                  try { tv.visibility = android.view.View.VISIBLE } catch(_: Throwable) {}
-                  v++
-                } else { try { tv.visibility = android.view.View.GONE } catch(_: Throwable) {} }
-              }
-              if (v != labelLastVis) { labelLastVis = v; try { lastUdp = (lastUdp + "\nLABEL-STATE vis=" + v + "/" + labelViews.size).takeLast(12000) } catch(_: Throwable) {} }
-            } catch(_: Throwable) {}
-          }
-        } catch(_: Throwable) {}
-      } catch(_: Throwable) {}
-    }
     fun exit3d() {
       try { for (p in visStash) { try { p.first.visibility = p.second } catch(_: Throwable) {} }; visStash.clear() } catch(_: Throwable) {}
       try { gfxExitLatch = renderer3d?.gfxLine() ?: "?" } catch(_: Throwable) {}
       try { renderer3d?.stop() } catch(_: Throwable) {}
-      renderer3d = null
-      try { removeLabels() } catch(_: Throwable) {}
+      try { drawer.setDrawerLockMode(DrawerLayout.LOCK_MODE_UNLOCKED); drawer.setScrimColor(0x99000000.toInt()) } catch(_: Throwable) {}
       try { view3d.visibility = View.GONE } catch(_: Throwable) {}
       try { if (StreamBridge.streaming) scope.launch(Dispatchers.IO) { try { val s = snap(); if (s != null) StreamBridge.pushHist(streamDevId, s) } catch(_: Throwable) {} } } catch(_: Throwable) {}
     }
@@ -372,7 +287,7 @@ class MainActivity : ComponentActivity() {
     }
     fun buildReport(): String {
       val df = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US)
-      return "EPHORA DEBUG "+df.format(Date())+"\napp=7.42\nndk="+NdkCore.helloSafe()+"\ndevice="+Build.MANUFACTURER+" "+Build.MODEL+" sdk="+Build.VERSION.SDK_INT+"\ngrid="+lastGrid+"\nuser="+lastUser.replace("\"","")+"\nstart="+lastStart+"\nsesion="+sesionFlag+" circuitoEdadS="+((if (mundoT0 > 0L) ((System.currentTimeMillis() - mundoT0) / 1000L).toString() else "?"))+"\nfase="+phase.text+"\n---login---\n"+lastOut+"\n---caps---\n"+lastCaps+"\n---udp---\n"+lastUdp+"\nCHAT-RX-ESTADO n="+ChatManager.rxCount+"\nIM-RX-ESTADO n="+ChatManager.imRxCount+"\n---chat---\n"+chatRing.joinToString("\n")+"\nACK-COUNT n="+ChatManager.ackTxTotal+" rxmsg="+ChatManager.ackTotal+"\n"+AgentLoop.nearLine+"\nORACULO "+AgentLoop.sintLine+" | "+AgentLoop.destLine+"\nPING-ESTADO tx="+AgentLoop.pingTx+" ultimo="+AgentLoop.lastPingId+"\nLOGIN-UI tarjeta userFull="+vis(userFull)+" pw="+vis(pw)+" btnEnter="+vis(btnEnter)+" loginView="+vis(loginView)+" mundo="+vis(mundo)+"\n"+UdpCircuit.rxCountLine()+"STREAM streamDev="+streamDevId+" "+StreamBridge.lastState+"\n---gfx---\n"+(try { renderer3d?.gfxLine() ?: (if (gfxExitLatch != "?") "3D-cerrado " + gfxExitLatch else if (gfxOpenLatch != "?") "3D-cerrado " + gfxOpenLatch else "3D-cerrado") } catch(_: Throwable) { "GFX-DIAG error" })+"\nTERRA nPk="+TerrainMesh.nPk+" patches="+TerrainMesh.patchesGot()+"/256 min="+TerrainMesh.minH+" max="+TerrainMesh.maxH+"\nPRIMS-DEC terse="+PrimDecoder.nTerse+"/"+PrimDecoder.nObjTerse+" comp="+PrimDecoder.nComp+"/"+PrimDecoder.nObjComp+" full="+PrimDecoder.nFull+"/"+PrimDecoder.nObjFull+" cached="+PrimDecoder.nCached+" kill="+PrimDecoder.nKill+"\n---fin---"
+      return "EPHORA DEBUG "+df.format(Date())+"\napp=7.42\nndk="+NdkCore.helloSafe()+"\ndevice="+Build.MANUFACTURER+" "+Build.MODEL+" sdk="+Build.VERSION.SDK_INT+"\ngrid="+lastGrid+"\nuser="+lastUser.replace("\"","")+"\nstart="+lastStart+"\nsesion="+sesionFlag+" circuitoEdadS="+((if (mundoT0 > 0L) ((System.currentTimeMillis() - mundoT0) / 1000L).toString() else "?"))+"\nfase="+phase.text+"\n---login---\n"+lastOut+"\n---caps---\n"+lastCaps+"\n---udp---\n"+lastUdp+"\nCHAT-RX-ESTADO n="+ChatManager.rxCount+"\nIM-RX-ESTADO n="+ChatManager.imRxCount+"\n---chat---\n"+chatRing.joinToString("\n")+"\nACK-COUNT n="+ChatManager.ackTxTotal+" rxmsg="+ChatManager.ackTotal+"\n"+AgentLoop.nearLine+"\nORACULO "+AgentLoop.sintLine+" | "+AgentLoop.destLine+"\nPING-ESTADO tx="+AgentLoop.pingTx+" ultimo="+AgentLoop.lastPingId+"\\n"+ImageAssets.status()+"\\nLOGIN-UI tarjeta userFull="+vis(userFull)+" pw="+vis(pw)+" btnEnter="+vis(btnEnter)+" loginView="+vis(loginView)+" mundo="+vis(mundo)+"\n"+UdpCircuit.rxCountLine()+"STREAM streamDev="+streamDevId+" "+StreamBridge.lastState+"\n---gfx---\n"+(try { renderer3d?.gfxLine() ?: (if (gfxExitLatch != "?") "3D-cerrado " + gfxExitLatch else if (gfxOpenLatch != "?") "3D-cerrado " + gfxOpenLatch else "3D-cerrado") } catch(_: Throwable) { "GFX-DIAG error" })+"\nTERRA nPk="+TerrainMesh.nPk+" patches="+TerrainMesh.patchesGot()+"/256 min="+TerrainMesh.minH+" max="+TerrainMesh.maxH+"\nPRIMS-DEC terse="+PrimDecoder.nTerse+"/"+PrimDecoder.nObjTerse+" comp="+PrimDecoder.nComp+"/"+PrimDecoder.nObjComp+" full="+PrimDecoder.nFull+"/"+PrimDecoder.nObjFull+" cached="+PrimDecoder.nCached+" kill="+PrimDecoder.nKill+"\n---fin---"
     }
     fun snapSession(): StreamBridge.SessionSnap? {
       return try {
@@ -613,7 +528,8 @@ class MainActivity : ComponentActivity() {
     btn3d.setOnClickListener {
       try {
         if (renderer3d?.isAlive() == true) {
-          try { view3d.visibility = View.VISIBLE } catch(_: Throwable) {}
+      try { drawer.closeDrawers(); drawer.setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED); drawer.setScrimColor(android.graphics.Color.TRANSPARENT) } catch(_: Throwable) {}
+      try { view3d.visibility = View.VISIBLE; view3d.bringToFront() } catch(_: Throwable) {}
           udpLog("3D-YA-ABIERTO loop-unico")
           return@setOnClickListener
         }
@@ -626,12 +542,15 @@ class MainActivity : ComponentActivity() {
       } catch(_: Throwable) {}
       try { opening3d = true } catch(_: Throwable) {}
       try {
+        drawer.closeDrawers()
+        drawer.setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED)
+        drawer.setScrimColor(android.graphics.Color.TRANSPARENT)
         visStash.clear()
         visStash.add(Pair(mundo, mundo.visibility))
         mundo.visibility = View.GONE
         for (v in listOf(chatListScroll, convBar, chatScroll, inputRow)) { visStash.add(Pair(v, v.visibility)); v.visibility = View.GONE }
       } catch(_: Throwable) {}
-      try { view3d.visibility = View.VISIBLE } catch(_: Throwable) {}
+      try { view3d.visibility = View.VISIBLE; view3d.bringToFront() } catch(_: Throwable) {}
       var supTries = 0
       var forceW = 0
       var forceH = 0
@@ -663,9 +582,9 @@ class MainActivity : ComponentActivity() {
             try { forceW = mw } catch(_: Throwable) {}
             try { forceH = mh2 } catch(_:Throwable) {}
           }
-          val r = SlWorldRenderer(this@MainActivity)
+          val r = renderer3d ?: SlWorldRenderer(this@MainActivity)
           r3d = r
-          r.onStats = { line -> try { udpLog(line) } catch(_: Throwable) {}; try { refreshLabels() } catch(_: Throwable) {} }
+          r.onStats = { line -> try { udpLog(line) } catch(_: Throwable) {} }
           view3d.visibility = View.VISIBLE
           if (forceW > 1 && forceH > 1) { try { r.applyMetrics(forceW, forceH) } catch(_: Throwable) {} }
           if (!r.start(surface3d, forceW, forceH)) throw RuntimeException("3d-init")
@@ -674,7 +593,6 @@ class MainActivity : ComponentActivity() {
           try { gfxOpenLatch = r.gfxLine() } catch(_: Throwable) {}
           try { gfxExitLatch = "?" } catch(_: Throwable) {}
           udpLog("3D-ABIERTO")
-          try { createLabels() } catch(_: Throwable) {}
           try { udpLog(r.sunState() + " surf=" + surface3d.width + "x" + surface3d.height) } catch(_: Throwable) {}
           try { AgentLoop.sintTestOnce() } catch(_: Throwable) {}
           try { udpLog("GFX-OPEN " + gfxOpenLatch) } catch(_: Throwable) {}
@@ -682,6 +600,7 @@ class MainActivity : ComponentActivity() {
           try { opening3d = false } catch(_: Throwable) {}
           try { for (p in visStash) { try { p.first.visibility = p.second } catch(_: Throwable) {} }; visStash.clear() } catch(_: Throwable) {}
           renderer3d = null
+          try { drawer.setDrawerLockMode(DrawerLayout.LOCK_MODE_UNLOCKED); drawer.setScrimColor(0x99000000.toInt()) } catch(_: Throwable) {}
           try { view3d.visibility = View.GONE } catch(_: Throwable) {}
           Toast.makeText(this@MainActivity, "3D no disponible", Toast.LENGTH_SHORT).show()
           udpLog("3D-ERROR " + (r3d?.initError ?: ("exc=" + e::class.java.simpleName + " msg=" + (e.message ?: "sin-mensaje"))))

@@ -3,7 +3,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Locale
 object PrimDecoder {
-  data class Prim(val id: Long, var tipo: Int, var x: Double, var y: Double, var z: Double, var sx: Float, var sy: Float, var sz: Float, var yaw: Float, var seen: Long, var mat: Int = -1, var tex: String = "")
+  data class Prim(val id: Long, var tipo: Int, var x: Double, var y: Double, var z: Double, var sx: Float, var sy: Float, var sz: Float, var yaw: Float, var seen: Long, var mat: Int = -1, var tex: String = "", var texScaleS: Float = 1f, var texScaleT: Float = 1f, var texOffsetS: Float = 0f, var texOffsetT: Float = 0f, var texRotation: Float = 0f, var texR: Float = 1f, var texG: Float = 1f, var texB: Float = 1f, var texA: Float = 1f)
   var nTerse = 0L
   var nComp = 0L
   var nFull = 0L
@@ -124,7 +124,49 @@ object PrimDecoder {
       return Pair(o + 1 + n, p.copyOfRange(o + 1, o + 1 + n))
     } catch (_: Throwable) { return Pair(-1, ByteArray(0)) }
   }
-  private fun zeroExpand(data: ByteArray): ByteArray {
+  private data class TextureEntryFields(val uuid: String, val scaleS: Float, val scaleT: Float, val offsetS: Float, val offsetT: Float, val rotation: Float, val r: Float, val g: Float, val b: Float, val a: Float)
+  // SL TextureEntry fields use one default value followed by variable-length face masks and overrides.
+  private fun parseTextureEntry(raw: ByteArray): TextureEntryFields? {
+    try {
+      var o = 0
+      fun field(size: Int): ByteArray? {
+        if (size <= 0 || o + size > raw.size) return null
+        val base = raw.copyOfRange(o, o + size)
+        o += size
+        var guard = 0
+        while (o < raw.size && guard++ < 128) {
+          var flags = 0L
+          var more: Boolean
+          var bytes = 0
+          do {
+            if (o >= raw.size || bytes++ >= 10) return null
+            val v = raw[o++].toInt() and 255
+            flags = (flags shl 7) or (v and 0x7f).toLong()
+            more = (v and 0x80) != 0
+          } while (more)
+          if (flags == 0L) return base
+          if (o + size > raw.size) return null
+          o += size
+        }
+        return if (o == raw.size) base else null
+      }
+      val id = field(16) ?: return null
+      val color = field(4) ?: return null
+      val ss = field(4) ?: return null
+      val st = field(4) ?: return null
+      val os = field(2) ?: return null
+      val ot = field(2) ?: return null
+      val rot = field(2) ?: return null
+      val uuidHex = hexPrev(id, 16).lowercase(Locale.US)
+      val uuid = uuidHex.substring(0,8)+"-"+uuidHex.substring(8,12)+"-"+uuidHex.substring(12,16)+"-"+uuidHex.substring(16,20)+"-"+uuidHex.substring(20,32)
+      val sc = ByteBuffer.wrap(ss).order(ByteOrder.LITTLE_ENDIAN).float
+      val tc = ByteBuffer.wrap(st).order(ByteOrder.LITTLE_ENDIAN).float
+      val s16 = ByteBuffer.wrap(os).order(ByteOrder.LITTLE_ENDIAN).short.toInt()
+      val t16 = ByteBuffer.wrap(ot).order(ByteOrder.LITTLE_ENDIAN).short.toInt()
+      val r16 = ByteBuffer.wrap(rot).order(ByteOrder.LITTLE_ENDIAN).short.toInt()
+      return TextureEntryFields(uuid, sc.coerceIn(-100f,100f), tc.coerceIn(-100f,100f), s16 / 32767f, t16 / 32767f, (r16 / 32768f) * (Math.PI * 2.0).toFloat(), (255 - (color[0].toInt() and 255)) / 255f, (255 - (color[1].toInt() and 255)) / 255f, (255 - (color[2].toInt() and 255)) / 255f, (255 - (color[3].toInt() and 255)) / 255f)
+    } catch (_: Throwable) { return null }
+  }  private fun zeroExpand(data: ByteArray): ByteArray {
     try {
       val out = mutableListOf<Byte>()
       var i = 0
@@ -244,7 +286,7 @@ object PrimDecoder {
       synchronized(recs) {
         for (r in recs.values) {
           if (r.tex.isNotEmpty() && !out.contains(r.tex)) out.add(r.tex)
-          if (out.size >= 8) break
+          if (out.size >= 48) break
         }
       }
       return out
@@ -664,18 +706,14 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
         if (o < 0) { try { stashFullMu("skG", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
         o = skipVar(p, o, false)
         if (o < 0) { try { stashFullMu("skH", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
-        // TextureEntry = primera V2 = wA. Su primer campo es el UUID de textura por defecto (16 bytes); skipGet ya quitó el prefijo V2.
+        // TextureEntry V2 has the default image UUID first, then typed fields with face overrides.
         try {
-          var best = ByteArray(0)
-          try { if (wA.size >= 20) best = wA } catch(_: Throwable) {}
-          if (best.size >= 20) {
-            val raw32 = hexPrev(best.copyOfRange(0, 16), 16)
-            val full = raw32.substring(0, 8) + "-" + raw32.substring(8, 12) + "-" + raw32.substring(12, 16) + "-" + raw32.substring(16, 20) + "-" + raw32.substring(20, 32)
-            try { synchronized(recs) { val r = recs[id]; if (r != null && r.tex.isEmpty()) r.tex = full } } catch(_: Throwable) {}
-            try { if (texIds.size < 8 && texIds.add(id)) { val tl = "TEX-UUID id=" + id + " u=" + full + " id8=" + full.take(8); try { texEmitTotal++ } catch(_: Throwable) {}; try { texEmitSesion++ } catch(_: Throwable) {}; try { onTexLine?.invoke(tl) } catch(_: Throwable) {} } } catch(_: Throwable) {}
+          val te = parseTextureEntry(wA)
+          if (te != null) {
+            try { synchronized(recs) { val r = recs[id]; if (r != null) { if (r.tex.isEmpty()) r.tex = te.uuid; r.texScaleS = te.scaleS; r.texScaleT = te.scaleT; r.texOffsetS = te.offsetS; r.texOffsetT = te.offsetT; r.texRotation = te.rotation; r.texR = te.r; r.texG = te.g; r.texB = te.b; r.texA = te.a } } } catch(_: Throwable) {}
+            try { if (texIds.size < 8 && texIds.add(id)) { val tl = "TEX-UUID id=" + id + " u=" + te.uuid + " id8=" + te.uuid.take(8) + " uv=" + te.scaleS + "," + te.scaleT + "," + te.offsetS + "," + te.offsetT + "," + te.rotation; try { texEmitTotal++ } catch(_: Throwable) {}; try { texEmitSesion++ } catch(_: Throwable) {}; try { onTexLine?.invoke(tl) } catch(_: Throwable) {} } } catch(_: Throwable) {}
           }
-        } catch(_: Throwable) {}
-        if (o + 66 > p.size) { try { stashFullMu("fix66", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
+        } catch(_: Throwable) {}        if (o + 66 > p.size) { try { stashFullMu("fix66", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
         o += 66
         try { stashFullMu("ok", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}
         got += 1

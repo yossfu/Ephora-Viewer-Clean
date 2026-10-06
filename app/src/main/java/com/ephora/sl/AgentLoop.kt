@@ -279,7 +279,7 @@ object AgentLoop {
           } catch(_: Throwable) {}
           continue
         }
-        if (imgReqSent.size >= 8) break
+        if (imgReqSent.size >= 48) break
         try { java.util.UUID.fromString(u) } catch(_: Throwable) { try { onTick?.invoke("IMAGE-REQ-UUID-MALO u=" + u.take(20)) } catch(_: Throwable) {}; continue }
         val b = UdpCircuit.requestImage(s.agentId, s.sessionId, u)
         val seq = try { ByteBuffer.wrap(b, 1, 4).order(ByteOrder.BIG_ENDIAN).int.toLong() and 0xFFFFFFFFL } catch(_: Throwable) { UdpCircuit.lastSeq() }
@@ -526,6 +526,7 @@ object AgentLoop {
         try {
           val d = UdpCircuit.decode(buf, len)
           if (d != null) {
+            try { ImageAssets.accept(mid, d.payload)?.let { onTick?.invoke(it) } } catch(_: Throwable) {}
             try {
               val line = UdpCircuit.parseImage(mid, d.payload)
               if (line != null) {
@@ -563,6 +564,7 @@ object AgentLoop {
     val s = LoginManager.Session
     if (s.agentId.isBlank() || s.simIp.isBlank() || s.simPort == 0) return
     running = true
+    try { ImageAssets.resetSession() } catch(_: Throwable) {}
     try { imgReqSent.clear() } catch(_: Throwable) {}
     try { imgReqTime.clear() } catch(_: Throwable) {}
     try { imgReqTry.clear() } catch(_: Throwable) {}

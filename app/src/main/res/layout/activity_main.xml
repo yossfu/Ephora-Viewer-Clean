@@ -409,9 +409,9 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:visibility="gone"
-            android:background="#000000">
+            android:background="@android:color/transparent">
 
-            <SurfaceView
+            <android.opengl.GLSurfaceView
                 android:id="@+id/surface3d"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent" />
