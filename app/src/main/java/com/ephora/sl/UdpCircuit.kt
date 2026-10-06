@@ -144,6 +144,7 @@ object UdpCircuit {
       9 -> "ImageData"
       10 -> "ImagePacket"
       86 -> "ImageNotInDatabase"
+      0xFFFF0056.toInt() -> "ImageNotInDatabase"
       0xFFFF0040.toInt() -> "TeleportLocal"
       0xFFFF0042.toInt() -> "TeleportProgress"
       0xFFFF0045.toInt() -> "TeleportFinish"

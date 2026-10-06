@@ -551,17 +551,18 @@ object AgentLoop {
           }
         } catch(_: Throwable) {}
       }
-      if (mid == 9 || mid == 10 || mid == 86) {
+      if (mid == 9 || mid == 10 || mid == 86 || mid == 0xFFFF0056.toInt()) {
         try { imgRxCount++ } catch(_: Throwable) {}
         try { onTick?.invoke("IMAGE-RAW mid=" + java.lang.Integer.toHexString(mid).uppercase() + " len=" + len) } catch(_: Throwable) {}
         try {
           val d = UdpCircuit.decode(buf, len)
           if (d != null) {
-            try { ImageAssets.accept(mid, d.payload)?.let { onTick?.invoke(it) } } catch(_: Throwable) {}
+            val imgMid = if (mid == 0xFFFF0056.toInt()) 86 else mid
+            try { ImageAssets.accept(imgMid, d.payload)?.let { onTick?.invoke(it) } } catch(_: Throwable) {}
             try {
-              val line = UdpCircuit.parseImage(mid, d.payload)
+              val line = UdpCircuit.parseImage(imgMid, d.payload)
               if (line != null) {
-                try { if (line.startsWith("IMAGE-DATA")) imgDataOk.add(line.substringAfter("id=").take(8)) } catch(_: Throwable) {}
+                try { if (line.startsWith("IMAGE-DATA")) imgDataOk.add(line.substringAfter("id=").take(8).lowercase()) } catch(_: Throwable) {}
                 try { onTick?.invoke(line) } catch(_: Throwable) {}
               }
             } catch(_: Throwable) {}
@@ -703,7 +704,7 @@ object AgentLoop {
                     }
                   } catch(_: Throwable) {}
                 }
-                if (rx != null && rx.msgId != 1 && rx.msgId != 2 && rx.msgId != 4 && rx.msgId != 0xFF06 && rx.msgId != 12 && rx.msgId != 13 && rx.msgId != 14 && rx.msgId != 15 && rx.msgId != 16 && rx.msgId != 0xFFFFFFFB.toInt() && rx.msgId != 0xFFFF008B.toInt() && rx.msgId != 9 && rx.msgId != 10 && rx.msgId != 86 && rx.msgId != 64 && rx.msgId != 66 && rx.msgId != 69 && rx.msgId != 72 && rx.msgId != 73 && rx.msgId != -1) {
+                if (rx != null && rx.msgId != 1 && rx.msgId != 2 && rx.msgId != 4 && rx.msgId != 0xFF06 && rx.msgId != 12 && rx.msgId != 13 && rx.msgId != 14 && rx.msgId != 15 && rx.msgId != 16 && rx.msgId != 0xFFFFFFFB.toInt() && rx.msgId != 0xFFFF008B.toInt() && rx.msgId != 9 && rx.msgId != 10 && rx.msgId != 86 && rx.msgId != 64 && rx.msgId != 66 && rx.msgId != 69 && rx.msgId != 72 && rx.msgId != 73 && rx.msgId != -1 && rx.msgId != 11 && rx.msgId != 0xFFFF0094.toInt() && rx.msgId != 0xFFFF00FE.toInt() && rx.msgId != 0xFFFF00EC.toInt() && rx.msgId != 236 && rx.msgId != 0xFFFF0142.toInt() && rx.msgId != 0xFFFF0143.toInt() && rx.msgId != 0xFFFF0056.toInt()) {
                   try {
                     val d = UdpCircuit.decode(p.data, p.length)
                     if (d != null) {

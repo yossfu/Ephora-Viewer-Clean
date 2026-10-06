@@ -130,7 +130,7 @@ object MeshAssets {
             }
             failed++
             last = "fail:$id ${e.javaClass.simpleName}:${(e.message ?: "").take(80)}"
-            try { failLast.addLast(id.take(8) + ":" + e.javaClass.simpleName) } catch(_: Throwable) {}
+            try { failLast.addLast(id.take(8) + ":" + e.javaClass.simpleName + ":" + (e.message ?: "").take(48)) } catch(_: Throwable) {}
             try { while (failLast.size > 8) failLast.removeFirst() } catch(_: Throwable) {}
           } finally {
             synchronized(lock) { scheduled.remove(id) }
@@ -206,7 +206,7 @@ object MeshAssets {
       .header("Range", "bytes=$start-$end")
       .header("Accept", "*/*")
       .header("Accept-Encoding", "identity")
-      .header("User-Agent", "EPHORASL/7.43 (Android)")
+      .header("User-Agent", "EPHORASL/7.44 (Android)")
       .build()
     client.newCall(request).execute().use { response ->
       if (!response.isSuccessful) throw IllegalStateException("http-${response.code}")
