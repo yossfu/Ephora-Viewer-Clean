@@ -30,7 +30,7 @@ object MeshAssets {
   private const val MAX_DECOMPRESSED_BYTES = 32 * 1024 * 1024
   // Keep enough recently-used geometry for the active region view. Visible meshes
   // are pinned separately so background requests cannot evict geometry in use.
-  private const val MAX_CACHE_ENTRIES = 48
+  private const val MAX_CACHE_ENTRIES = 96
   private const val MAX_PENDING = 128
   private const val RETRY_BASE_MS = 2500L
   private const val RETRY_MAX_MS = 60000L

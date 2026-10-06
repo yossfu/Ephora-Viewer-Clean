@@ -39,6 +39,71 @@ object PrimDecoder {
   private fun censoAdd(set: LinkedHashSet<Long>, id: Long) {
     try { synchronized(recs) { if (set.size < 20000) set.add(id) } } catch (_: Throwable) {}
   }
+  private val answeredIds = LinkedHashSet<Long>()
+  private val evictSample = ArrayDeque<String>()
+  private val killSample = ArrayDeque<String>()
+  private val pubPrev = LinkedHashSet<Long>()
+  @Volatile var pubDiffLatch = "sin-pub-aun"
+  @Volatile var advReqLatch = "sin-req-aun"
+  private var lastAdvReq = 0L
+  private var pubAx = 0.0
+  private var pubAy = 0.0
+  private var pubAz = 0.0
+  private fun evictStr(r: Prim, ax: Double, ay: Double, az: Double): String {
+    return r.id.toString() + " " + "%.0f,%.0f,%.0f".format(r.x, r.y, r.z) + " " + Math.sqrt((r.x - ax) * (r.x - ax) + (r.y - ay) * (r.y - ay)).toInt().toString() + "m"
+  }
+  private fun noteEvict(r: Prim, ax: Double, ay: Double, az: Double) {
+    try { evictSample.addLast(evictStr(r, ax, ay, az)) } catch(_: Throwable) {}
+    try { while (evictSample.size > 8) evictSample.removeFirst() } catch(_: Throwable) {}
+  }
+  private fun noteKill(id: Long) {
+    try { val rk = synchronized(recs) { recs[id] } ?: return } catch(_: Throwable) { return }
+    try { killSample.addLast(id.toString() + " " + "%.0f,%.0f,%.0f".format(rk.x, rk.y, rk.z)) } catch(_: Throwable) {}
+    try { while (killSample.size > 8) killSample.removeFirst() } catch(_: Throwable) {}
+  }
+  private fun updatePubDiff(pub: List<Prim>) {
+    val cur = LinkedHashSet<Long>()
+    try { for (p in pub) cur.add(p.id) } catch(_: Throwable) {}
+    var apIds: List<Long> = emptyList()
+    try { apIds = cur.filter { !pubPrev.contains(it) } } catch(_: Throwable) {}
+    var goIds: List<Long> = emptyList()
+    try { goIds = pubPrev.filter { !cur.contains(it) } } catch(_: Throwable) {}
+    try { pubDiffLatch = "ADV-PUB pub=" + cur.size + " nuevos=" + apIds.size + " [" + apIds.take(3).joinToString(" ") + "] fuera=" + goIds.size + " [" + goIds.take(3).joinToString(" ") + "] evict8=[" + evictSample.joinToString(" ") + "] kill8=[" + killSample.joinToString(" ") + "]" } catch(_: Throwable) {}
+    try { pubPrev.clear() } catch(_: Throwable) {}
+    try { pubPrev.addAll(cur) } catch(_: Throwable) {}
+  }
+  private fun maybeAdvReq() {
+    val now = System.currentTimeMillis()
+    try { if (now - lastAdvReq < 15000L) return } catch(_: Throwable) { return }
+    try { lastAdvReq = now } catch(_: Throwable) {}
+    var ids: List<Long> = emptyList()
+    try { ids = reqMultDone.filter { !answeredIds.contains(it) } } catch(_: Throwable) {}
+    try { ids = ids.sortedBy { distPend(it, pubAx, pubAy, pubAz) }.take(8) } catch(_: Throwable) {}
+    var mu = ""
+    try { mu = ids.joinToString(" ") { id -> id.toString() + ":" + Math.sqrt(distPend(id, pubAx, pubAy, pubAz)).toInt().toString() + "m:" + ((now - (try { reqMultTime[id] ?: now } catch(_: Throwable) { now })) / 1000L).toString() + "s" } } catch(_: Throwable) {}
+    try { advReqLatch = "ADV-REQ pedidas=" + nReqMultSent + " contestadas=" + nAnsweredReq + " sinResp=" + (reqMultDone.size - answeredIds.size) + " muestra=[" + mu + "]" } catch(_:Throwable) {}
+  }
+  fun advSceneLine(): String {
+    var tot = 0
+    var avatar = 0
+    var tex = 0
+    var shape = 0
+    var mesh = 0
+    var nada = 0
+    try { synchronized(recs) { tot = recs.size } } catch(_: Throwable) {}
+    try { synchronized(recs) { avatar = recs.values.count { it.tipo == 47 } } } catch(_: Throwable) {}
+    try { synchronized(recs) { tex = recs.values.count { it.tipo != 47 && hasRealTex(it) } } } catch(_: Throwable) {}
+    try { synchronized(recs) { shape = recs.values.count { it.tipo != 47 && it.hasShape } } } catch(_: Throwable) {}
+    try { synchronized(recs) { mesh = recs.values.count { it.tipo != 47 && it.meshId.isNotEmpty() } } } catch(_: Throwable) {}
+    try { synchronized(recs) { nada = recs.values.count { it.tipo != 47 && !hasRealTex(it) && !it.hasShape && it.meshId.isEmpty() } } } catch(_: Throwable) {}
+    return "ADV-SCENE recs=" + tot + " avatar=" + avatar + " tex=" + tex + " forma=" + shape + " mesh=" + mesh + " pelados=" + nada
+  }
+  private const val NULL_UUID = "00000000-0000-0000-0000-000000000000"
+  private fun hasRealTex(r: Prim): Boolean {
+    try { if (r.tex.isNotEmpty() && r.tex != NULL_UUID) return true } catch(_: Throwable) {}
+    try { for (f in r.texFaces) { if (f.uuid.isNotEmpty() && f.uuid != NULL_UUID) return true } } catch(_: Throwable) {}
+    return false
+  }
   fun censoLine(): String {
     return "CENSO terse=" + censoTerse.size + " comp=" + censoComp.size + " full=" + censoFull.size + " cached=" + censoCached.size + " attach=" + censoAttach.size + " recs=" + count() + " capT=" + nTerseCap + " capF=" + nFullCap
   }
@@ -101,6 +166,12 @@ object PrimDecoder {
     try { synchronized(recs) { reqMultPend.clear() } } catch(_: Throwable) {}
     try { synchronized(recs) { reqMultDone.clear() } } catch(_: Throwable) {}
     try { synchronized(recs) { reqMultTime.clear() } } catch(_: Throwable) {}
+    try { synchronized(recs) { answeredIds.clear() } } catch(_: Throwable) {}
+    try { synchronized(recs) { evictSample.clear() } } catch(_: Throwable) {}
+    try { synchronized(recs) { killSample.clear() } } catch(_: Throwable) {}
+    try { synchronized(recs) { pubPrev.clear() } } catch(_: Throwable) {}
+    try { pubDiffLatch = "sin-pub-aun" } catch(_: Throwable) {}
+    try { advReqLatch = "sin-req-aun" } catch(_: Throwable) {}
     nReqMultSent = 0L
     nReqMultPk = 0L
     meshExtraBlocks = 0L
@@ -408,7 +479,7 @@ object PrimDecoder {
       synchronized(recs) {
         for (r in recs.values) {
           if (r.tipo == 47) continue
-          if (r.tex.isNotEmpty() || r.texFaces.isNotEmpty()) continue
+          if (hasRealTex(r)) continue
           if (reqMultDone.contains(r.id)) continue
           if (reqMultPend.size >= 20000) break
           if (reqMultPend.add(r.id)) n++
@@ -417,11 +488,11 @@ object PrimDecoder {
           val cand = ArrayList<Prim>()
           for (r in recs.values) {
             if (r.tipo == 47) continue
-            if (r.tex.isNotEmpty() || r.texFaces.isNotEmpty()) continue
+            if (hasRealTex(r)) continue
             if (!reqMultDone.contains(r.id)) continue
             if (reqMultPend.contains(r.id)) continue
             val t = try { reqMultTime[r.id] ?: 0L } catch(_: Throwable) { 0L }
-            if (now - t < 45000L) continue
+            if (now - t < 15000L) continue
             cand.add(r)
           }
           cand.sortBy { r -> (r.x - ax) * (r.x - ax) + (r.y - ay) * (r.y - ay) + (r.z - az) * (r.z - az) }
@@ -718,6 +789,7 @@ object PrimDecoder {
           val yw = yawVec(bb.getFloat(52), bb.getFloat(56), bb.getFloat(60))
           put(id, pcode, x, y, z, sx, sy, sz, yw, now, blk[26].toInt() and 0xFF)
           try { censoAdd(censoComp, id) } catch(_: Throwable) {}
+          try { synchronized(recs) { if (reqMultDone.contains(id)) { nAnsweredReq++; answeredIds.add(id) } } } catch(_: Throwable) {}
         } else {
           try { nLenMalo++ } catch(_: Throwable) {}
         }
@@ -892,7 +964,7 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
           synchronized(recs) { recs[id]?.let { it.meshId = meshId ?: "" } }
           if (meshId != null) { meshIds++; meshParamLast = meshId; MeshAssets.request(meshId) }
         } catch(_: Throwable) {}
-        try { synchronized(recs) { if (reqMultDone.contains(id)) nAnsweredReq++ } } catch(_: Throwable) {}
+        try { synchronized(recs) { if (reqMultDone.contains(id)) { nAnsweredReq++; answeredIds.add(id) } } } catch(_: Throwable) {}
         try { synchronized(recs) { if (!recs.containsKey(id)) nFullNoRec++ } } catch(_: Throwable) {}
         o += 66
         try { stashFullMu("ok", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}
@@ -944,6 +1016,7 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
           }
         }
         try { if (reqMultTime.size > 20000) reqMultTime.keys.firstOrNull()?.let { reqMultTime.remove(it) } } catch(_: Throwable) {}
+        try { if (answeredIds.size > 20000) answeredIds.remove(answeredIds.first()) } catch(_: Throwable) {}
         return out
       }
     } catch(_: Throwable) { return emptyList() }
@@ -997,6 +1070,7 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
         try {
           val had = synchronized(recs) { recs.containsKey(id) }
           if (had) {
+            try { noteKill(id) } catch(_: Throwable) {}
             try { synchronized(recs) { recs.remove(id) } } catch (_: Throwable) {}
             try { nKillHit++ } catch (_: Throwable) {}
           } else {
@@ -1119,7 +1193,7 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
         try {
           var con = 0
           var tot = 0
-          synchronized(recs) { for (r in recs.values) { tot += 1; if (r.tex.isNotEmpty()) con += 1 } }
+          synchronized(recs) { for (r in recs.values) { tot += 1; if (hasRealTex(r)) con += 1 } }
           val texLine2 = "TEX-ESTADO con=" + con + " sin=" + (tot - con) + " obj=" + tot + " emit=" + texEmitTotal
           try { texEstadoLatch = texLine2 } catch(_: Throwable) {}
           return texLine2
@@ -1172,18 +1246,24 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
         val all = recs.values.toList()
         try { recsLast = all.size } catch (_: Throwable) {}
         val sorted = all.sortedBy { r -> (r.x - ax) * (r.x - ax) + (r.y - ay) * (r.y - ay) + (r.z - az) * (r.z - az) }
-        if (recs.size > 600) {
+        if (recs.size > 4000) {
           var i = 0
           for (r in sorted) {
             i += 1
-            if (i > 600) {
+            if (i > 4000) {
+              try { noteEvict(r, ax, ay, az) } catch(_: Throwable) {}
               try { recs.remove(r.id) } catch(_: Throwable) {}
               try { nEvict++ } catch(_: Throwable) {}
             }
           }
         }
-        val pub = sorted.take(256).map { r -> r.copy() }
+        val pub = sorted.take(1024).map { r -> r.copy() }
         try { pubLast = pub.size } catch (_: Throwable) {}
+        try { pubAx = ax } catch(_: Throwable) {}
+        try { pubAy = ay } catch(_: Throwable) {}
+        try { pubAz = az } catch(_: Throwable) {}
+        try { updatePubDiff(pub) } catch(_: Throwable) {}
+        try { maybeAdvReq() } catch(_: Throwable) {}
         return pub
       }
     } catch(_: Throwable) { return emptyList() }

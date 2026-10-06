@@ -16,8 +16,8 @@ import kotlinx.coroutines.launch
 object ImageAssets {
   private const val J2C_IMAGE_CODEC = 2
   private const val MAX_COMPRESSED = 16 * 1024 * 1024
-  private const val MAX_BITMAPS = 48
-  private const val MAX_PENDING = 96
+  private const val MAX_BITMAPS = 128
+  private const val MAX_PENDING = 192
   private data class Pending(var expected: Int = 0, var codec: Int = 0, val parts: TreeMap<Int, ByteArray> = TreeMap(), var touched: Long = 0L, var queued: Boolean = false) {
     fun byteCount(): Int = parts.values.sumOf { it.size }
   }

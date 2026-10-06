@@ -84,6 +84,49 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var meshObjects = 0
   private val glTextures = LinkedHashMap<String, Int>()
   private var texturedObjects = 0
+  @Volatile private var frPub = 0
+  @Volatile private var frCull = 0
+  @Volatile private var frMesh = 0
+  @Volatile private var frShaped = 0
+  @Volatile private var frTex = 0
+  @Volatile private var frBeige = 0
+  @Volatile private var frAvatar = 0
+  @Volatile private var frMuMesh = "-"
+  @Volatile private var frMuShaped = "-"
+  @Volatile private var frMuTex = "-"
+  @Volatile private var frMuBeige = "-"
+  @Volatile private var frDiffLatch = "sin-frame-aun"
+  private var frPrev = LinkedHashSet<Long>()
+  private var lastFrDiff = 0L
+  private fun probeTex(o: PrimDecoder.Prim): String {
+    var u = ""
+    try { u = o.texFaces.firstOrNull()?.uuid ?: o.tex } catch(_: Throwable) {}
+    try { if (u == NULL_TEXTURE_UUID) return "" } catch(_: Throwable) { return "" }
+    return u
+  }
+  private fun texHit(o: PrimDecoder.Prim): Boolean {
+    var u = ""
+    try { u = probeTex(o) } catch(_: Throwable) {}
+    try { if (u.isEmpty()) return false } catch(_: Throwable) { return false }
+    try { return glTextures.containsKey(u.lowercase()) } catch(_: Throwable) { return false }
+  }
+  private fun nextId(s: String, id: Long): String {
+    return s + (if (s.isEmpty()) "" else " ") + id.toString()
+  }
+  private fun updateFrDiff(objects: List<PrimDecoder.Prim>) {
+    val ids = LinkedHashSet<Long>()
+    try { for (o in objects) ids.add(o.id) } catch(_: Throwable) {}
+    var ap: List<Long> = emptyList()
+    try { ap = ids.filter { !frPrev.contains(it) } } catch(_: Throwable) {}
+    var go: List<Long> = emptyList()
+    try { go = frPrev.filter { !ids.contains(it) } } catch(_: Throwable) {}
+    try { frDiffLatch = "pantalla-entra=" + ap.size + " [" + ap.take(3).joinToString(" ") + "] pantalla-sale=" + go.size + " [" + go.take(3).joinToString(" ") + "]" } catch(_: Throwable) {}
+    try { frPrev.clear() } catch(_: Throwable) {}
+    try { frPrev.addAll(ids) } catch(_: Throwable) {}
+  }
+  fun frameLine(): String {
+    return "ADV-FRAME pub=" + frPub + " cull=" + frCull + " mesh=" + frMesh + " forma=" + frShaped + " tex=" + frTex + " beige=" + frBeige + " avatar=" + frAvatar + " malla=[" + frMuMesh + "] formaM=[" + frMuShaped + "] texM=[" + frMuTex + "] beigeM=[" + frMuBeige + "] " + frDiffLatch
+  }
 
   fun applyMetrics(w: Int, h: Int) { width = w.coerceAtLeast(1); height = h.coerceAtLeast(1) }
 
@@ -268,7 +311,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       try { AgentLoop.camVec = floatArrayOf(slEx.toFloat(), slEy.toFloat(), slEz.toFloat(), cax.toFloat(), cay.toFloat(), caz.toFloat(), (-crx).toFloat(), (-cry).toFloat(), (-crz).toFloat(), cux.toFloat(), cuy.toFloat(), cuz.toFloat()) } catch(_: Throwable) {}
       Matrix.multiplyMM(vp, 0, projection, 0, camera, 0)
       drawCount = 0
-      PrimShapes.budget = 6
+      PrimShapes.budget = 60
       texturedObjects = 0
       meshReferences = 0
       meshObjects = 0
@@ -289,10 +332,21 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
         }
       }
       MeshAssets.updateVisibleMeshes(visibleMeshIds)
+      frPub = n
+      frCull = 0
+      frMesh = 0
+      frShaped = 0
+      frTex = 0
+      frBeige = 0
+      frAvatar = 0
+      var sMeshIds = ""
+      var sShapedIds = ""
+      var sTexIds = ""
+      var sBeigeIds = ""
       for (i in 0 until n) {
         val o = objects[i]
         val x = o.x - 128.0; val y = o.z; val z = -(o.y - 128.0)
-        if (x < minX || x > maxX || z < minZ || z > maxZ) continue
+        if (x < minX || x > maxX || z < minZ || z > maxZ) { try { frCull++ } catch(_: Throwable) {}; continue }
         val sx = o.sx.coerceIn(0.05f, 64f); val sy = o.sy.coerceIn(0.05f, 64f); val sz = o.sz.coerceIn(0.05f, 64f)
         val isAvatar = o.tipo == 47
         val color = when {
@@ -310,6 +364,14 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
         val meshGeometry = if (!isAvatar && o.meshId.isNotEmpty()) MeshAssets.mesh(o.meshId) else null
         val shaped = if (!isAvatar && o.hasShape) PrimShapes.obtain(PrimShapes.quantize(o.pathCurve, o.profileCurve, o.shPb, o.shPe, o.shPsx, o.shPsy, o.shShx, o.shShy, o.shTw, o.shTwb, o.shRo, o.shTpx, o.shTpy, o.shRev, o.shSk, o.shQb, o.shQe, o.shQh)) else null
         if (!isAvatar && o.meshId.isNotEmpty()) meshReferences++
+        if (isAvatar) frAvatar++
+        else if (meshGeometry != null) frMesh++
+        else if (shaped != null) frShaped++
+        else if (texHit(o)) frTex++ else frBeige++
+        try { if (!isAvatar && meshGeometry != null && frMesh <= 3) sMeshIds = nextId(sMeshIds, o.id) } catch(_: Throwable) {}
+        try { if (!isAvatar && meshGeometry == null && shaped != null && frShaped <= 3) sShapedIds = nextId(sShapedIds, o.id) } catch(_: Throwable) {}
+        try { if (!isAvatar && meshGeometry == null && shaped == null && texHit(o) && frTex <= 3) sTexIds = nextId(sTexIds, o.id) } catch(_: Throwable) {}
+        try { if (!isAvatar && meshGeometry == null && shaped == null && !texHit(o) && frBeige <= 3) sBeigeIds = nextId(sBeigeIds, o.id) } catch(_: Throwable) {}
         if (meshGeometry != null) {
           meshObjects++
           for ((faceIndex, face) in meshGeometry.faces.withIndex()) {
@@ -346,6 +408,12 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
           if (tex.isNotEmpty() && glTextures.containsKey(tex.lowercase())) texturedObjects++
         }
       }
+      try { frMuMesh = if (sMeshIds.isEmpty()) "-" else sMeshIds } catch(_: Throwable) {}
+      try { frMuShaped = if (sShapedIds.isEmpty()) "-" else sShapedIds } catch(_: Throwable) {}
+      try { frMuTex = if (sTexIds.isEmpty()) "-" else sTexIds } catch(_: Throwable) {}
+      try { frMuBeige = if (sBeigeIds.isEmpty()) "-" else sBeigeIds } catch(_: Throwable) {}
+      val nowFr = SystemClock.elapsedRealtime()
+      try { if (nowFr - lastFrDiff >= 5000L) { lastFrDiff = nowFr; updateFrDiff(objects) } } catch(_: Throwable) {}
       sceneObjects = n
       fpsFrames++
       val now = SystemClock.elapsedRealtime()
@@ -408,7 +476,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_REPEAT)
     GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
     glTextures[key] = id
-    while (glTextures.size > 48) {
+    while (glTextures.size > 128) {
       val oldestKey = glTextures.keys.firstOrNull() ?: break
       val oldest = glTextures.remove(oldestKey) ?: continue
       GLES20.glDeleteTextures(1, intArrayOf(oldest), 0)
