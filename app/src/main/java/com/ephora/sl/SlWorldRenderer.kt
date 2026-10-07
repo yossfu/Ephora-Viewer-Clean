@@ -164,7 +164,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       view = surface
       if (configuredSurface !== surface) {
         surface.setEGLContextClientVersion(2)
-        surface.setEGLConfigChooser(8, 8, 8, 0, 16, 0)
+        surface.setEGLConfigChooser(8, 8, 8, 0, 24, 8)
         surface.preserveEGLContextOnPause = true
         surface.setRenderer(this)
         configuredSurface = surface
@@ -294,7 +294,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   override fun onSurfaceChanged(gl: GL10?, w: Int, h: Int) {
     width = w.coerceAtLeast(1); height = h.coerceAtLeast(1)
     GLES20.glViewport(0, 0, width, height)
-    Matrix.perspectiveM(projection, 0, 54f, width.toFloat() / height.toFloat(), 0.1f, 1800f)
+    Matrix.perspectiveM(projection, 0, 54f, width.toFloat() / height.toFloat(), 0.25f, 512f)
     glSurfaceChanged = true
     lastFase = "GLES-superficie-${width}x$height"
   }
@@ -348,16 +348,16 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       updateTerrain()
       drawTerrain()
       if (DRAW_WATER_SURFACE) drawWater()
-      drawAvatar(p, q, r)
       val n = objects.size.coerceAtMost(MAX_OBJECTS)
-      val minX = eyeX - 220.0; val maxX = eyeX + 220.0
-      val minZ = eyeZ - 220.0; val maxZ = eyeZ + 220.0
+      val renderRadius = 512.0
+      val renderRadius2 = renderRadius * renderRadius
       val objMap=HashMap<Long,PrimDecoder.Prim>(objects.size)
       for(o in objects)objMap[o.id]=o
       val visibleMeshIds=ArrayList<String>()
       for(i in 0 until n){
         val o=objects[i]; val pose=poseOf(o,objMap); val x=pose.x-128.0; val z=-(pose.y-128.0)
-        if(o.tipo!=47&&o.meshId.isNotEmpty()&&x in minX..maxX&&z in minZ..maxZ)visibleMeshIds.add(o.meshId)
+        val dx=x-eyeX; val dz=z-eyeZ
+        if(o.tipo!=47&&o.meshId.isNotEmpty()&&dx*dx+dz*dz<=renderRadius2)visibleMeshIds.add(o.meshId)
       }
       MeshAssets.updateVisibleMeshes(visibleMeshIds)
       frPub = n
@@ -376,7 +376,8 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
         val o = objects[i]
         val pose=poseOf(o,objMap)
         val x=pose.x-128.0; val y=pose.z; val z=-(pose.y-128.0)
-        if (x < minX || x > maxX || z < minZ || z > maxZ) { try { frCull++ } catch(_: Throwable) {}; continue }
+        val dx=x-eyeX; val dz=z-eyeZ
+        if (dx*dx+dz*dz > renderRadius2) { try { frCull++ } catch(_: Throwable) {}; continue }
         val sx = o.sx.coerceIn(0.05f, 64f); val sy = o.sy.coerceIn(0.05f, 64f); val sz = o.sz.coerceIn(0.05f, 64f)
         val isAvatar = o.tipo == 47
         val color = when {
@@ -437,7 +438,8 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
             }
           }
         } else if (isAvatar) {
-          drawMesh(mesh, vertexCount, x, y, z, sx, sy, sz, o.yaw, color)
+          // Never substitute a sphere/capsule for an SL avatar.
+          continue
         } else {
           // Never fabricate a cube for a real-world object. Until its primitive
           // shape or mesh LOD is decoded, keep it pending/invisible. This avoids
@@ -610,10 +612,6 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     GLES20.glDepthMask(true)
     GLES20.glDisable(GLES20.GL_BLEND)
   }
-  private fun drawAvatar(x: Double, y: Double, z: Double) {
-    drawMesh(sphere, SPHERE_VERTS, x, y + 0.9, z, 0.42f, 0.9f, 0.32f, 0f, floatArrayOf(0.12f, 0.76f, 0.86f, 1f))
-  }
-
   private fun updateTerrain() {
     if (terrainVersion == TerrainMesh.version && terrain != null) return
     val n = TERRAIN_RES
