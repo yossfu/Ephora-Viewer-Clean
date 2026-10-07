@@ -374,7 +374,7 @@ object PrimDecoder {
           (255 - (c[0].toInt() and 255)) / 255f, (255 - (c[1].toInt() and 255)) / 255f,
           (255 - (c[2].toInt() and 255)) / 255f, (255 - (c[3].toInt() and 255)) / 255f, mg)
       }
-      return TextureEntryFields((0 until 32).map(::makeFace))
+      return TextureEntryFields((0 until 45).map(::makeFace))
     } catch (_: Throwable) { return null }
   }  private fun zeroExpand(data: ByteArray): ByteArray {
     try {
