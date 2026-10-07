@@ -1,12 +1,5 @@
-# EPHORA SL — Visor Second Life Real (Android, Opción 1)
+# EphoraSL 7.70
 
-Paso 0: scaffold inicial. Fork Alchemy + NDK vendrá en Paso 1.
+Android Second Life viewer development build.
 
-## Subir
-Doble clic en SUBIR-EPHORASL-A-GITHUB-AUTO.bat (usa repo.txt).
-
-## Compilación nube
-GitHub Actions compila APK debug en cada push a main.
-
-## Docs (fuente de verdad en Perchance src/)
-Ver docs/.
+This revision fixes the ObjectUpdate full-block framing so prim construction, TextureEntry, ExtraParams and mesh UUIDs can reach the renderer.

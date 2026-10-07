@@ -312,7 +312,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       try { AgentLoop.camVec = floatArrayOf(slEx.toFloat(), slEy.toFloat(), slEz.toFloat(), cax.toFloat(), cay.toFloat(), caz.toFloat(), (-crx).toFloat(), (-cry).toFloat(), (-crz).toFloat(), cux.toFloat(), cuy.toFloat(), cuz.toFloat()) } catch(_: Throwable) {}
       Matrix.multiplyMM(vp, 0, projection, 0, camera, 0)
       drawCount = 0
-      PrimShapes.budget = 60
+      PrimShapes.budget = 180
       texturedObjects = 0
       meshReferences = 0
       meshObjects = 0
@@ -386,29 +386,19 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
               tf?.scaleS ?: o.texScaleS, tf?.scaleT ?: o.texScaleT,
               tf?.offsetS ?: o.texOffsetS, tf?.offsetT ?: o.texOffsetT, tf?.rotation ?: o.texRotation)
           }
-        } else if (shaped != null) {
+        } else if (o.meshId.isEmpty() && shaped != null) {
           val face0 = o.texFaces.firstOrNull()
           val tex0 = face0?.uuid?.takeUnless { it == NULL_TEXTURE_UUID } ?: o.tex
           val tint0 = if (face0 != null) floatArrayOf(face0.r, face0.g, face0.b, face0.a) else color
           drawMesh(shaped.buf, shaped.count, x, y, z, sx, sz, sy, o.yaw, tint0, tex0, 1f, 1f, 0f, 0f, 0f)
         } else if (isAvatar) {
           drawMesh(mesh, vertexCount, x, y, z, sx, sy, sz, o.yaw, color)
-        } else if (!isCylinder && !isSphere && mesh != null && o.texFaces.size >= 6) {
-          for (face in 0 until 6) {
-            val f = o.texFaces[face]
-            val uuid = if (f.uuid != NULL_TEXTURE_UUID) f.uuid else o.tex
-            drawMesh(mesh, 6, x, y, z, sx, sz, sy, o.yaw, floatArrayOf(f.r, f.g, f.b, f.a),
-              uuid, f.scaleS, f.scaleT, f.offsetS, f.offsetT, f.rotation, face * 6)
-          }
-          if (o.texFaces.any { it.uuid != NULL_TEXTURE_UUID && glTextures.containsKey(it.uuid.lowercase()) }) texturedObjects++
         } else {
-          val face0 = o.texFaces.firstOrNull()
-          val tex = face0?.uuid?.takeUnless { it == NULL_TEXTURE_UUID } ?: o.tex
-          val tint = if (face0 != null) floatArrayOf(face0.r, face0.g, face0.b, face0.a) else color
-          drawMesh(mesh, vertexCount, x, y, z, sx, sz, sy, o.yaw, tint, tex,
-            face0?.scaleS ?: o.texScaleS, face0?.scaleT ?: o.texScaleT,
-            face0?.offsetS ?: o.texOffsetS, face0?.offsetT ?: o.texOffsetT, face0?.rotation ?: o.texRotation)
-          if (tex.isNotEmpty() && glTextures.containsKey(tex.lowercase())) texturedObjects++
+          // Never fabricate a cube for a real-world object. Until its primitive
+          // shape or mesh LOD is decoded, keep it pending/invisible. This avoids
+          // the misleading “all cubes” scene and lets the world converge to the
+          // actual Second Life geometry as assets arrive.
+          continue
         }
       }
       try { frMuMesh = if (sMeshIds.isEmpty()) "-" else sMeshIds } catch(_: Throwable) {}

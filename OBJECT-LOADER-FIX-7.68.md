@@ -1,4 +1,4 @@
-# EphoraSL 7.68 — Object Loader Fix
+# EphoraSL 7.69 — Object Loader Fix
 
 ## Objetivo
 Corregir la carga de objetos del mundo (prims, objetos procedurales y mesh) cuando llegan por `ObjectUpdate`, especialmente los bloques `ObjectData` de precisión 8/16/32 bits y las actualizaciones donde la forma/textura llegan en el mismo bloque después de la posición.
@@ -12,7 +12,7 @@ Corregir la carga de objetos del mundo (prims, objetos procedurales y mesh) cuan
 - Los objetos desconocidos con coordenadas viewer-relative cercanas al origen dejan de ocupar el presupuesto de render del mundo.
 - Se mantiene la re-solicitud de objetos sin forma/mesh, pero evita insistir en registros que ya tienen forma o mesh.
 - `reset()` limpia los estados pendientes de objetos, formas, texturas y mesh.
-- Versión `7.68`, `versionCode 136`.
+- Versión `7.69`, `versionCode 136`.
 
 ## Validación local
 `PrimDecoder.kt` se compila con `kotlinc` y se ejecuta un arnés sintético que construye y decodifica bloques `ObjectUpdate` de 16/32/48/60/76 bytes, verificando posición, forma y UUID de textura. Los cinco formatos pasan. `PrimShapes.kt` también compila.

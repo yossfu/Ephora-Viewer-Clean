@@ -297,9 +297,13 @@ object PrimDecoder {
           val bb = ByteBuffer.wrap(blk).order(ByteOrder.LITTLE_ENDIAN)
           Movement(bb.getFloat(0).toDouble(), bb.getFloat(4).toDouble(), bb.getFloat(8).toDouble(), yawVec(bb.getFloat(36), bb.getFloat(40), bb.getFloat(44)))
         }
-        76 -> {
+        76, 140 -> {
           val bb = ByteBuffer.wrap(blk).order(ByteOrder.LITTLE_ENDIAN)
           Movement(bb.getFloat(16).toDouble(), bb.getFloat(20).toDouble(), bb.getFloat(24).toDouble(), yawVec(bb.getFloat(52), bb.getFloat(56), bb.getFloat(60)))
+        }
+        124 -> {
+          val bb = ByteBuffer.wrap(blk).order(ByteOrder.LITTLE_ENDIAN)
+          Movement(bb.getFloat(0).toDouble(), bb.getFloat(4).toDouble(), bb.getFloat(8).toDouble(), yawVec(bb.getFloat(36), bb.getFloat(40), bb.getFloat(44)))
         }
         else -> null
       }
@@ -390,7 +394,7 @@ object PrimDecoder {
         val tc = ByteBuffer.wrap(scalesT[i]).order(ByteOrder.LITTLE_ENDIAN).float.coerceIn(-100f,100f)
         val so = ByteBuffer.wrap(offsetsS[i]).order(ByteOrder.LITTLE_ENDIAN).short.toInt()
         val to = ByteBuffer.wrap(offsetsT[i]).order(ByteOrder.LITTLE_ENDIAN).short.toInt()
-        val ro = ByteBuffer.wrap(rotations[i]).order(ByteOrder.LITTLE_ENDIAN).short.toInt()
+        val ro = u16at(rotations[i], 0)
         val c = colors[i]
         return TextureFace(uuid, sc, tc, so / 32767f, to / 32767f, (ro / 32768f) * (Math.PI * 2.0).toFloat(),
           (255 - (c[0].toInt() and 255)) / 255f, (255 - (c[1].toInt() and 255)) / 255f,
@@ -945,91 +949,122 @@ object PrimDecoder {
       o += 1
       if (count <= 0) return 0
       var got = 0
-      var guard = count.coerceAtMost(255)
-      while (guard-- > 0) {
-        if (o + 40 > p.size) break
+      var guard = count.coerceAtMost(64)
+      try { if (count > 64) nFullCap += (count - 64).toLong() } catch (_: Throwable) {}
+      while (guard > 0) {
+        guard -= 1
+        var muId = -1L
+        var muIlen = -1
+        var muPc = -1
+        var muIn = ""
+        var wA = ByteArray(0)
+        var wC = ByteArray(0)
+        var wD = ByteArray(0)
+        var wExtra = ByteArray(0)
+        if (o + 40 > p.size) { try { stashFullMu("hdr40", muId, muIlen, muPc, muIn, 0, 0, 0) } catch(_: Throwable) {}; break }
         val hb = p.copyOfRange(o, o + 40)
         val bb = ByteBuffer.wrap(hb).order(ByteOrder.LITTLE_ENDIAN)
+        // CITA-LE full-hdr: OMV PacketsBig.cs:13897 ObjectLocalID LE
         val id = bb.int.toLong() and 0xFFFFFFFFL
         val pcode = hb[25].toInt() and 0xFF
-        val sx = bb.getFloat(28); val sy = bb.getFloat(32); val sz = bb.getFloat(36)
+        val sx = bb.getFloat(28)
+        val sy = bb.getFloat(32)
+        val sz = bb.getFloat(36)
         o += 40
-        if (o >= p.size) break
-        val ilen = p[o].toInt() and 255
+        muId = id
+        muPc = pcode
+        if (o + 1 > p.size) { try { stashFullMu("ilen1", muId, muIlen, muPc, muIn, 0, 0, 0) } catch(_: Throwable) {}; break }
+        val ilen = p[o].toInt() and 0xFF
         o += 1
-        if (ilen <= 0 || ilen > 200 || o + ilen > p.size) {
-          nLenMalo++; break
-        }
-        val ibc = p.copyOfRange(o, o + ilen)
-        val mv = decodeObjectMovement(ibc, ilen)
-        if (mv == null) {
-          nLenMalo++
+        muIlen = ilen
+        if (o + ilen > p.size) { try { stashFullMu("ilenN", muId, muIlen, muPc, muIn, 0, 0, 0) } catch(_: Throwable) {}; break }
+        if (ilen != 16 && ilen != 32 && ilen != 48 && ilen != 60 && ilen != 76 && ilen != 124 && ilen != 140) {
+          try { nLenMalo++ } catch(_: Throwable) {}
+          try { stashFullMu("ilenX", muId, muIlen, muPc, muIn, 0, 0, 0) } catch(_: Throwable) {}
         } else {
-          censoAdd(censoFull, id)
-          put(id, pcode, mv.x, mv.y, mv.z, sx, sy, sz, mv.yaw, now, hb[26].toInt() and 255)
+          val ibc = p.copyOfRange(o, o + ilen)
+          val mv = decodeObjectMovement(ibc, ilen)
+          if (mv == null) { try { nLenMalo++ } catch(_: Throwable) {}; o += ilen; continue }
+          try { censoAdd(censoFull, id) } catch (_: Throwable) {}
+          try { muIn = "p=" + mv.x + "," + mv.y + "," + mv.z + " " } catch(_: Throwable) {}
+          put(id, pcode, mv.x, mv.y, mv.z, sx, sy, sz, mv.yaw, now, hb[26].toInt() and 0xFF)
+          try { synchronized(recs) { if (reqMultDone.contains(id)) { nAnsweredReq++; answeredIds.add(id) } } } catch(_: Throwable) {}
         }
         o += ilen
-        // ParentID (4) + UpdateFlags (4) + the 31-byte prim construction block.
-        if (o + 8 + 31 > p.size) break
-        o += 8
-        val sh = ShapeData(
-          pathCurve = p[o].toInt() and 255,
-          profileCurve = p[o + 1].toInt() and 255,
-          pb = (u16at(p, o + 2) * 0.00002f).coerceIn(0f, 1f),
-          pe = (1f - u16at(p, o + 4) * 0.00002f).coerceIn(0f, 1f),
-          psx = ((200 - (p[o + 6].toInt() and 255)) * 0.01f).coerceIn(0.01f, 2.56f),
-          psy = ((200 - (p[o + 7].toInt() and 255)) * 0.01f).coerceIn(0.01f, 2.56f),
-          shx = p[o + 8].toInt() / 100f, shy = p[o + 9].toInt() / 100f,
-          tw = p[o + 10].toInt() / 100f, twb = p[o + 11].toInt() / 100f,
-          ro = p[o + 12].toInt() / 100f, tpx = p[o + 13].toInt() / 100f, tpy = p[o + 14].toInt() / 100f,
-          rev = 1f + (p[o + 15].toInt() and 255) * 0.015f, sk = p[o + 16].toInt() / 100f,
-          qb = (u16at(p, o + 17) * 0.00002f).coerceIn(0f, 1f),
-          qe = (1f - u16at(p, o + 19) * 0.00002f).coerceIn(0f, 1f),
-          qh = (u16at(p, o + 21) * 0.00002f).coerceIn(0f, 1f)
-        )
-        synchronized(recs) {
-          val r = recs[id]
-          if (r != null) applyShapeLocked(r, sh) else pendingShapes[id] = sh
-        }
+        // CITA-DECODE formas (manda el codigo, no el comentario de la plantilla): LibreMetaverse Primitive.cs UnpackBeginCut/UnpackEndCut/UnpackPathScale/UnpackPathShear/UnpackPathTwist/UnpackPathTaper/UnpackPathRevolutions/UnpackProfileHollow (copia scratch/upstream/LM-Primitive.cs:1537-1631) + OpenSim PrimitiveBaseShape.cs ToPrim (PathEnd=1-raw*2e-5, ProfileEnd=1-raw*2e-5, Scale=(200-raw)*0.01, Shear S8 con signo, Rev=1+raw*0.015; copia scratch/upstream/PrimitiveBaseShape.cs:1427-1445). Los comentarios quanta=0.01 de message_template.msg estan obsoletos: el End va INVERTIDO (raw 0 = sin corte = 1.0).
+        if (o + 31 > p.size) { try { stashFullMu("in30", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
+        val fPathCurve = p[o + 8].toInt() and 255
+        val fProfileCurve = p[o + 9].toInt() and 255
+        val fPb = (u16at(p, o + 10) * 0.00002f).coerceIn(0f, 1f)
+        val fPe = (1f - u16at(p, o + 12) * 0.00002f).coerceIn(0f, 1f)
+        val fPsx = (200 - (p[o + 14].toInt() and 255)) * 0.01f
+        val fPsy = (200 - (p[o + 15].toInt() and 255)) * 0.01f
+        val fShx = p[o + 16].toInt() / 100f
+        val fShy = p[o + 17].toInt() / 100f
+        val fTw = p[o + 18].toInt() / 100f
+        val fTwb = p[o + 19].toInt() / 100f
+        val fRo = p[o + 20].toInt() / 100f
+        val fTpx = p[o + 21].toInt() / 100f
+        val fTpy = p[o + 22].toInt() / 100f
+        val fRev = 1f + (p[o + 23].toInt() and 255) * 0.015f
+        val fSk = p[o + 24].toInt() / 100f
+        val fQb = (u16at(p, o + 25) * 0.00002f).coerceIn(0f, 1f)
+        val fQe = (1f - u16at(p, o + 27) * 0.00002f).coerceIn(0f, 1f)
+        val fQh = (u16at(p, o + 29) * 0.00002f).coerceIn(0f, 1f)
         o += 31
-        var sgv = skipGet(p, o, true) // TextureEntry V2
-        if (sgv.first < 0) break
+        val sh = ShapeData(fPathCurve, fProfileCurve, fPb, fPe, fPsx, fPsy, fShx, fShy, fTw, fTwb, fRo, fTpx, fTpy, fRev, fSk, fQb, fQe, fQh)
+        try { synchronized(recs) { recs[id]?.let { applyShapeLocked(it, sh) } ?: run { pendingShapes[id] = sh } } } catch(_: Throwable) {}
+        var sgv = skipGet(p, o, true)
+        if (sgv.first < 0) { try { stashSkA(muId, muIlen, muPc, muIn, o, p.size, p) } catch(_: Throwable) {}; break }
         o = sgv.first
-        try {
-          parseTextureEntry(sgv.second)?.let { te ->
-            val f0 = te.faces.firstOrNull()
-            if (f0 != null && f0.uuid.isNotEmpty() && f0.uuid != NULL_UUID) nFullTex++ else nFullSinTex++
-            synchronized(recs) {
-              val r = recs[id]
-              if (r != null) applyTextureLocked(r, te) else pendingTextures[id] = te
-            }
-          } ?: run { nFullSinTex++ }
-        } catch(_: Throwable) {}
-        sgv = skipGet(p, o, false); if (sgv.first < 0) break; o = sgv.first // TextureAnim
-        sgv = skipGet(p, o, true); if (sgv.first < 0) break; o = sgv.first // NameValue
-        sgv = skipGet(p, o, true); if (sgv.first < 0) break; o = sgv.first // Data
-        sgv = skipGet(p, o, false); if (sgv.first < 0) break; o = sgv.first // Text
-        if (o + 4 > p.size) break; o += 4 // TextColor
-        sgv = skipGet(p, o, false); if (sgv.first < 0) break; o = sgv.first // MediaURL
-        sgv = skipGet(p, o, false); if (sgv.first < 0) break; o = sgv.first // PSBlock
-        sgv = skipGet(p, o, false); if (sgv.first < 0) break // ExtraParams
+        wA = sgv.second
+        // ObjectUpdate exact wire order after TextureEntry:
+        // TextureAnim Variable 1 -> NameValue Variable 2 -> Data Variable 2 -> Text Variable 1.
+        // NameValue uses a 16-bit length; Text uses an 8-bit length.
+        sgv = skipGet(p, o, false)
+        if (sgv.first < 0) { try { stashFullMu("skTA", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
         o = sgv.first
-        val wExtra = sgv.second
+        sgv = skipGet(p, o, true)
+        if (sgv.first < 0) { try { stashFullMu("skB", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
+        o = sgv.first
+        wC = sgv.second
+        sgv = skipGet(p, o, true)
+        if (sgv.first < 0) { try { stashFullMu("skC", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
+        o = sgv.first
+        wD = sgv.second
+        sgv = skipGet(p, o, false)
+        if (sgv.first < 0) { try { stashFullMu("skD", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
+        o = sgv.first
+        if (o + 4 > p.size) { try { stashFullMu("fix4", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
+        o += 4
+        o = skipVar(p, o, false)
+        if (o < 0) { try { stashFullMu("skF", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
+        o = skipVar(p, o, false)
+        if (o < 0) { try { stashFullMu("skG", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
+        sgv = skipGet(p, o, false)
+        if (sgv.first < 0) { try { stashFullMu("skH", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
+        o = sgv.first
+        wExtra = sgv.second
+        // TextureEntry V2 has the default image UUID first, then typed fields with face overrides.
         try {
-          if (wExtra.isNotEmpty()) meshExtraBlocks++
-          val meshId = meshIdFromExtraParams(wExtra)
-          if (meshId != null) {
-            meshIds++; meshParamLast = meshId; MeshAssets.request(meshId)
-            synchronized(recs) {
-              val r = recs[id]
-              if (r != null) r.meshId = meshId else pendingMeshes[id] = meshId
-            }
+          val te = parseTextureEntry(wA)
+          try { if (te != null && te.faces[0].uuid.isNotEmpty() && te.faces[0].uuid != NULL_UUID) nFullTex++ else nFullSinTex++ } catch(_: Throwable) {}
+          if (te != null) {
+            try { synchronized(recs) { val r = recs[id]; if (r != null) { val face0 = te.faces[0]; if (r.tex.isEmpty()) r.tex = face0.uuid; r.texFaces = te.faces; r.texScaleS = face0.scaleS; r.texScaleT = face0.scaleT; r.texOffsetS = face0.offsetS; r.texOffsetT = face0.offsetT; r.texRotation = face0.rotation; r.texR = face0.r; r.texG = face0.g; r.texB = face0.b; r.texA = face0.a } } } catch(_: Throwable) {}
+            try { if (texIds.size < 8 && texIds.add(id)) { val tl = "TEX-UUID id=" + id + " u=" + te.faces[0].uuid + " id8=" + te.faces[0].uuid.take(8) + " uv=" + te.faces[0].scaleS + "," + te.faces[0].scaleT + "," + te.faces[0].offsetS + "," + te.faces[0].offsetT + "," + te.faces[0].rotation; try { texEmitTotal++ } catch(_: Throwable) {}; try { texEmitSesion++ } catch(_: Throwable) {}; try { onTexLine?.invoke(tl) } catch(_: Throwable) {} } } catch(_: Throwable) {}
           }
         } catch(_: Throwable) {}
-        try { synchronized(recs) { if (reqMultDone.contains(id)) { nAnsweredReq++; answeredIds.add(id) } } } catch(_: Throwable) {}
-        if (o + 66 > p.size) break
+        if (o + 66 > p.size) { try { stashFullMu("fix66", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
+        val meshId = meshIdFromExtraParams(wExtra)
+        try {
+          if (wExtra.isNotEmpty()) meshExtraBlocks++
+          synchronized(recs) { recs[id]?.let { it.meshId = meshId ?: "" } ?: run { if (meshId != null) pendingMeshes[id] = meshId } }
+          if (meshId != null) { meshIds++; meshParamLast = meshId; MeshAssets.request(meshId) }
+        } catch(_: Throwable) {}
+        try { synchronized(recs) { if (!recs.containsKey(id)) nFullNoRec++ } } catch(_: Throwable) {}
         o += 66
-        got++
+        try { stashFullMu("ok", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}
+        got += 1
       }
       return got
     } catch(_: Throwable) { return 0 }
@@ -1133,7 +1168,7 @@ object PrimDecoder {
           val had = synchronized(recs) { recs.containsKey(id) }
           if (had) {
             try { noteKill(id) } catch(_: Throwable) {}
-            try { synchronized(recs) { recs.remove(id) } } catch (_: Throwable) {}
+            try { synchronized(recs) { recs.remove(id); pendingShapes.remove(id); pendingTextures.remove(id); pendingMeshes.remove(id); reqMultPend.remove(id); reqMultDone.remove(id); reqMultTime.remove(id) } } catch (_: Throwable) {}
             try { nKillHit++ } catch (_: Throwable) {}
           } else {
             try { nKillMiss++ } catch (_: Throwable) {}

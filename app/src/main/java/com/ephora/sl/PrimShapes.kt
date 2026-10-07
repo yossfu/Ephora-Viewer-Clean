@@ -20,9 +20,9 @@ object PrimShapes {
   data class Params(val path: Int, val prof: Int, val hole: Int, val pathBegin: Float, val pathEnd: Float, val pathScaleX: Float, val pathScaleY: Float, val pathShearX: Float, val pathShearY: Float, val pathTwist: Float, val pathTwistBegin: Float, val pathRadiusOffset: Float, val pathTaperX: Float, val pathTaperY: Float, val pathRevolutions: Float, val pathSkew: Float, val profileBegin: Float, val profileEnd: Float, val profileHollow: Float)
   data class Mesh(val buf: java.nio.FloatBuffer, val count: Int)
   private data class Key(val p: Params)
-  private val cache = object : LinkedHashMap<Key, Mesh>(64, 0.75f, true) {
+  private val cache = object : LinkedHashMap<Key, Mesh>(128, 0.75f, true) {
     override fun removeEldestEntry(e: MutableMap.MutableEntry<Key, Mesh>): Boolean {
-      return size > 64
+      return size > 128
     }
   }
   @Volatile var budget = 0
