@@ -903,7 +903,11 @@ object AgentLoop {
                 val nowR = System.currentTimeMillis()
                 val go = try { (TerrainComposition.textureIds() + PrimDecoder.texList(px, py, pz)).distinct().any { lane -> !imgReqSent.contains(lane) || ((imgReqTry[lane] ?: 1) < 3 && !imgLista(lane) && nowR - (imgReqTime[lane] ?: 0L) > 20000L) } } catch(_: Throwable) { false }
                 try { ImageAssets.touchIds((TerrainComposition.textureIds() + PrimDecoder.texList(px, py, pz)).distinct().take(96)) } catch(_: Throwable) {}
-                if (nowR - lastHttpTexKick >= 1000L) {\n                  lastHttpTexKick = nowR\n                  try { TexFetch.requestVisible(PrimDecoder.texList(px, py, pz), 4) } catch(_: Throwable) {}\n                }\n                if (go) sendImageReqBody("tick")
+                if (nowR - lastHttpTexKick >= 1000L) {
+                  lastHttpTexKick = nowR
+                  try { TexFetch.requestVisible(PrimDecoder.texList(px, py, pz), 4) } catch(_: Throwable) {}
+                }
+                if (go) sendImageReqBody("tick")
                 try {
                   if (imgRxCount == 0L && System.currentTimeMillis() - loopT0 > 90000L) {
                     val cands = try { PrimDecoder.texList(px, py, pz).filter { (imgReqTry[it] ?: 0) >= 3 && !imgUnrelSent.contains(it) } } catch(_: Throwable) { emptyList<String>() }
