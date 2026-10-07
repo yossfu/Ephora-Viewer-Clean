@@ -284,7 +284,11 @@ object UdpCircuit {
   fun requestImage(agentId: String, sessionId: String, imageUuid: String): ByteArray {
     return requestImageBody(headerReliable(), agentId, sessionId, imageUuid, 0)
   }
-  private fun requestImageBody(h: ByteArray, agentId: String, sessionId: String, imageUuid: String, type: Int): ByteArray {
+  /** Request/re-request one specific ImagePacket. Packet 0 asks for ImageData; >0 asks for that ImagePacket. */
+  fun requestImagePacket(agentId: String, sessionId: String, imageUuid: String, packet: Int): ByteArray {
+    return requestImageBody(headerReliable(), agentId, sessionId, imageUuid, 0, packet.coerceAtLeast(0))
+  }
+  private fun requestImageBody(h: ByteArray, agentId: String, sessionId: String, imageUuid: String, type: Int, packet: Int = 0): ByteArray {
     val p = ByteBuffer.allocate(1 + 32 + 1 + 26).order(ByteOrder.BIG_ENDIAN)
     p.put(0x08.toByte())
     p.put(uuidBE(agentId))
@@ -294,7 +298,7 @@ object UdpCircuit {
     p.order(ByteOrder.LITTLE_ENDIAN)
     p.put(0.toByte())
     p.putFloat(100000f)
-    p.putInt(0)
+    p.putInt(packet)
     p.put(type.toByte())
     return h + p.array()
   }
