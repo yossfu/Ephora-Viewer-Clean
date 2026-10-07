@@ -1,3 +1,4 @@
+import java.net.URI
 plugins { id("com.android.application"); kotlin("android") }
 android { namespace = "com.ephora.sl"; compileSdk = 34; ndkVersion = "27.0.12077973"
 defaultConfig { applicationId = "com.ephora.sl"; minSdk = 29; targetSdk = 34; versionCode = 142; versionName = "7.74-real-sl"
@@ -27,7 +28,7 @@ val prepareSecondLifeAvatarAssets by tasks.registering {
         outDir.mkdirs()
         files.forEach{name->
             val dst=File(outDir,name)
-            if(!dst.exists()||dst.length()<1000L){java.net.URI(base+name).toURL().openStream().use{input->dst.outputStream().use{input.copyTo(it)}}}
+            if(!dst.exists()||dst.length()<1000L){URI(base+name).toURL().openStream().use{input->dst.outputStream().use{input.copyTo(it)}}}
         }
     }
 }
