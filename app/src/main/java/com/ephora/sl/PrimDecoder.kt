@@ -329,7 +329,7 @@ object PrimDecoder {
         if (size <= 0 || o + size > raw.size) return null
         val base = raw.copyOfRange(o, o + size)
         o += size
-        val values = Array(32) { base }
+        val values = Array(45) { base }
         var guard = 0
         while (o < raw.size && guard++ < 64) {
           var flags = 0L
@@ -356,8 +356,9 @@ object PrimDecoder {
       val offsetsS = field(2) ?: return null
       val offsetsT = field(2) ?: return null
       val rotations = field(2) ?: return null
-      // TexGen is stored in the low three bits of the MediaFlags byte.
-      // 0=default, 2=planar, 4=spherical, 6=cylindrical.
+      // Serialized TextureEntry order is: ... Rotation, Material, MediaFlags,
+      // Glow, MaterialID. MediaFlags bits 1..2 contain TexGen.
+      val material = if (o < raw.size) field(1) else null
       val media = if (o < raw.size) field(1) else null
       fun makeFace(i: Int): TextureFace {
         val idHex = hexPrev(ids[i], 16).lowercase(Locale.US)
