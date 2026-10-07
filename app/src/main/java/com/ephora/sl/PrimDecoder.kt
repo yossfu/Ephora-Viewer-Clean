@@ -372,7 +372,7 @@ object PrimDecoder {
         val mg = media?.get(i)?.getOrNull(0)?.toInt()?.and(0x06) ?: 0
         return TextureFace(uuid, sc, tc, so / 32767f, to / 32767f, (ro / 32768f) * (Math.PI * 2.0).toFloat(),
           (c[0].toInt() and 255) / 255f, (c[1].toInt() and 255) / 255f,
-          (c[2].toInt() and 255) / 255f, (255 - (c[3].toInt() and 255)) / 255f, mg)
+          (c[2].toInt() and 255) / 255f, (c[3].toInt() and 255) / 255f, mg)
       }
       return TextureEntryFields((0 until 45).map(::makeFace))
     } catch (_: Throwable) { return null }
@@ -908,8 +908,9 @@ object PrimDecoder {
       var guard = count.coerceAtMost(255)
       while (guard-- > 0) {
         if (o + 6 > p.size) break
-        // ObjectUpdateCompressed: each block has a 4-byte local-id in the UDP
-        // block envelope followed by a 16-bit length, then the opaque Data blob.
+        // ObjectUpdateCompressed -> ObjectData.Data uses LLDataPackerBinaryBuffer.
+        // Data: UUID, LocalID, PCode, State, CRC, Material, ClickAction, Scale, Pos, Rot,
+        // SpecialCode, Owner and optional fields, then ConstructionData + TextureEntry.
         o += 4
         val dlen = u16at(p, o)
         o += 2
@@ -917,13 +918,14 @@ object PrimDecoder {
         val blk = p.copyOfRange(o, o + dlen)
         try {
           if (dlen < 85) { nLenMalo++; o += dlen; continue }
-          val fullIdHex = hexPrev(blk, 16)
+
           val id = ((blk[16].toInt() and 255) or
             ((blk[17].toInt() and 255) shl 8) or
             ((blk[18].toInt() and 255) shl 16) or
             ((blk[19].toInt() and 255) shl 24)).toLong() and 0xFFFFFFFFL
           val pcode = blk[20].toInt() and 255
           val state = blk[21].toInt() and 255
+          val crc = ByteBuffer.wrap(blk).order(ByteOrder.LITTLE_ENDIAN).getInt(22)
           val mat = blk[26].toInt() and 255
           val click = blk[27].toInt() and 255
           val bb = ByteBuffer.wrap(blk).order(ByteOrder.LITTLE_ENDIAN)
@@ -933,14 +935,19 @@ object PrimDecoder {
           val x = bb.getFloat(40).toDouble()
           val y = bb.getFloat(44).toDouble()
           val z = bb.getFloat(48).toDouble()
-          val qx=bb.getFloat(52); val qy=bb.getFloat(56); val qz=bb.getFloat(60); val qw=kotlin.math.sqrt((1f-qx*qx-qy*qy-qz*qz).coerceAtLeast(0f)); val yaw=yawQuat(qx,qy,qz,qw)
+          val qx = bb.getFloat(52)
+          val qy = bb.getFloat(56)
+          val qz = bb.getFloat(60)
+          val qw = kotlin.math.sqrt((1f - qx*qx - qy*qy - qz*qz).coerceAtLeast(0f))
+          val yaw = yawQuat(qx, qy, qz, qw)
           val flags = bb.getInt(64)
-          var i = 68
-          // OwnerID is always present.
-          i += 16
-          // Optional fields in the exact CompressedFlags order used by OpenMetaverse.
-          if ((flags and 0x80) != 0) i += 12 // angular velocity
+          var i = 84
           var parentId = 0L
+
+          if ((flags and 0x80) != 0) {
+            if (i + 12 > blk.size) throw IndexOutOfBoundsException("omega")
+            i += 12
+          }
           if ((flags and 0x20) != 0) {
             if (i + 4 > blk.size) throw IndexOutOfBoundsException("parent")
             parentId = ((blk[i].toInt() and 255) or
@@ -949,13 +956,23 @@ object PrimDecoder {
               ((blk[i + 3].toInt() and 255) shl 24)).toLong() and 0xFFFFFFFFL
             i += 4
           }
+
+          // ScratchPad: U32 declared size + Variable binary (U32 size + bytes).
           if ((flags and 0x02) != 0) {
-            i += 1 // Tree species
+            if (i + 1 > blk.size) throw IndexOutOfBoundsException("tree")
+            i += 1
           } else if ((flags and 0x01) != 0) {
-            if (i + 1 > blk.size) throw IndexOutOfBoundsException("scratch")
-            val n = blk[i].toInt() and 255
-            i += 1 + n
+            if (i + 8 > blk.size) throw IndexOutOfBoundsException("scratch")
+            val scratchSize = ByteBuffer.wrap(blk).order(ByteOrder.LITTLE_ENDIAN).getInt(i)
+            i += 4
+            val partSize = ByteBuffer.wrap(blk).order(ByteOrder.LITTLE_ENDIAN).getInt(i)
+            i += 4
+            if (scratchSize < 0 || scratchSize > 1_048_576 || partSize < 0 || partSize > 1_048_576 || i + partSize > blk.size) {
+              throw IndexOutOfBoundsException("scratchData")
+            }
+            i += partSize
           }
+
           if ((flags and 0x04) != 0) {
             i = readCstr(blk, i) ?: throw IndexOutOfBoundsException("text")
             if (i + 4 > blk.size) throw IndexOutOfBoundsException("textColor")
@@ -964,39 +981,50 @@ object PrimDecoder {
           if ((flags and 0x200) != 0) {
             i = readCstr(blk, i) ?: throw IndexOutOfBoundsException("media")
           }
-          if ((flags and 0x08) != 0) i += 86 // ParticleSystem fixed payload in the legacy compressed wire format
+          if ((flags and 0x08) != 0) {
+            if (i + 86 > blk.size) throw IndexOutOfBoundsException("particle")
+            i += 86
+          }
+
           val extraRead = readExtraParams(blk, i) ?: throw IndexOutOfBoundsException("extraParams")
           val extra = extraRead.first
           i += extraRead.second
+
           if ((flags and 0x10) != 0) {
             if (i + 25 > blk.size) throw IndexOutOfBoundsException("sound")
-            i += 25 // UUID16 + gainF32 + flagsU8 + radiusF32
+            i += 25
           }
-          if ((flags and 0x100) != 0) i = readCstr(blk, i) ?: throw IndexOutOfBoundsException("namevalues")
-          if (i + 23 > blk.size) throw IndexOutOfBoundsException("shape23")
-          val shape = parseShape23(blk, i) ?: throw IndexOutOfBoundsException("shape")
-          i += 23
+          if ((flags and 0x100) != 0) {
+            i = readCstr(blk, i) ?: throw IndexOutOfBoundsException("namevalues")
+          }
+
+          val shape = if (i + 23 <= blk.size) parseShape23(blk, i) else null
+          if (shape != null) i += 23 else throw IndexOutOfBoundsException("shape23")
+
           var texRaw = ByteArray(0)
           if (i + 4 <= blk.size) {
-            val texLen = ((blk[i].toInt() and 255) or
-              ((blk[i + 1].toInt() and 255) shl 8) or
-              ((blk[i + 2].toInt() and 255) shl 16) or
-              ((blk[i + 3].toInt() and 255) shl 24))
+            val texLen = ByteBuffer.wrap(blk).order(ByteOrder.LITTLE_ENDIAN).getInt(i)
             i += 4
-            if (texLen >= 0 && i + texLen <= blk.size) {
+            if (texLen >= 0 && texLen <= 1_048_576 && i + texLen <= blk.size) {
               texRaw = blk.copyOfRange(i, i + texLen)
-              i += texLen
             } else {
               throw IndexOutOfBoundsException("textureEntry")
             }
           }
-          put(id,pcode,x,y,z,sx,sy,sz,yaw,now,mat,parentId=parentId,rotX=qx,rotY=qy,rotZ=qz,rotW=qw)
+
+          put(id, pcode, x, y, z, sx, sy, sz, yaw, now,
+            mat, parentId = parentId, rotX = qx, rotY = qy, rotZ = qz, rotW = qw)
           synchronized(recs) { recs[id]?.let { applyShapeLocked(it, shape) } }
           decodeTextureAndMesh(id, texRaw, extra)
           censoAdd(censoComp, id)
-          if (reqMultDone.contains(id)) { nAnsweredReq++; answeredIds.add(id) }
+          if (reqMultDone.contains(id)) {
+            nAnsweredReq++
+            answeredIds.add(id)
+          }
           got++
-          if (diagLatch.length < 1) diagLatch = "COMP-FIRST id=$id pcode=$pcode state=$state click=$click flags=0x${flags.toUInt().toString(16)} extra=${extra.size} tex=${texRaw.size} parent=$parentId"
+          if (diagLatch.length < 1) {
+            diagLatch = "COMP-FIRST id=\$id pcode=\$pcode state=\$state crc=\$crc click=\$click flags=0x\${flags.toUInt().toString(16)} extra=\${extra.size} tex=\${texRaw.size} parent=\$parentId"
+          }
         } catch (_: Throwable) {
           nLenMalo++
         }
