@@ -18,7 +18,8 @@ import kotlin.math.sqrt
 // - LibreMetaverse Primitive.cs quanta: CUT/HOLLOW 0.00002, SCALE/SHEAR/TAPER 0.01, REV 0.015.
 object PrimShapes {
   data class Params(val path: Int, val prof: Int, val hole: Int, val pathBegin: Float, val pathEnd: Float, val pathScaleX: Float, val pathScaleY: Float, val pathShearX: Float, val pathShearY: Float, val pathTwist: Float, val pathTwistBegin: Float, val pathRadiusOffset: Float, val pathTaperX: Float, val pathTaperY: Float, val pathRevolutions: Float, val pathSkew: Float, val profileBegin: Float, val profileEnd: Float, val profileHollow: Float)
-  data class Mesh(val buf: java.nio.FloatBuffer, val count: Int)
+  data class FaceRange(val primFace: Int, val firstVertex: Int, val vertexCount: Int)
+  data class Mesh(val buf: java.nio.FloatBuffer, val count: Int, val faceRanges: List<FaceRange> = emptyList())
   private data class Key(val p: Params)
   private val cache = object : LinkedHashMap<Key, Mesh>(128, 0.75f, true) {
     override fun removeEldestEntry(e: MutableMap.MutableEntry<Key, Mesh>): Boolean {
@@ -178,7 +179,10 @@ object PrimShapes {
   }
   private class Soup {
     val d = mutableListOf<Float>()
+    val triFaces = mutableListOf<Int>()
     var n = 0
+    var currentFace = 1
+    fun beginFace(face: Int) { currentFace = face.coerceIn(0, 44) }
     fun tri(ax: Float, ay: Float, az: Float, anx: Float, any: Float, anz: Float, au: Float, av: Float, bx: Float, by: Float, bz: Float, bnx: Float, bny: Float, bnz: Float, bu: Float, bv: Float, cx: Float, cy: Float, cz: Float, cnx: Float, cny: Float, cnz: Float, cu: Float, cv: Float) {
       d.add(ax)
       d.add(ay)
@@ -204,6 +208,7 @@ object PrimShapes {
       d.add(cnz)
       d.add(cu)
       d.add(cv)
+      triFaces.add(currentFace)
       n++
     }
     fun quad(ax: Float, ay: Float, az: Float, anx: Float, any: Float, anz: Float, au: Float, av: Float, bx: Float, by: Float, bz: Float, bnx: Float, bny: Float, bnz: Float, bu: Float, bv: Float, cx: Float, cy: Float, cz: Float, cnx: Float, cny: Float, cnz: Float, cu: Float, cv: Float, dx: Float, dy: Float, dz: Float, dnx: Float, dny: Float, dnz: Float, du: Float, dv: Float) {
@@ -327,10 +332,19 @@ object PrimShapes {
       rings.add(ring)
       si++
     }
+    val outerFaceCount = when (k.prof) {
+      1 -> 4
+      2, 3, 4 -> 3
+      else -> 1
+    }
+    val hollowFace = outerFaceCount + 1
+    val bottomFace = if (inner.isNotEmpty()) hollowFace + 1 else outerFaceCount + 1
     var i = 0
     while (i < outer.size) {
       val j = (i + 1) % outer.size
       if (outerOpen && j == 0) break
+      s.beginFace(if (outerFaceCount == 1) 1 else (i % outerFaceCount) + 1)
+      s.beginFace(if (outerFaceCount == 1) 1 else (i % outerFaceCount) + 1)
       var si2 = 0
       while (si2 < steps) {
         val r0 = rings[si2]
@@ -345,6 +359,7 @@ object PrimShapes {
       i++
     }
     if (inner.isNotEmpty()) {
+      s.beginFace(hollowFace)
       val irings = mutableListOf<List<FloatArray>>()
       var si3 = 0
       while (si3 <= steps) {
@@ -388,14 +403,19 @@ object PrimShapes {
         }
         ii++
       }
+      s.beginFace(bottomFace)
       capRingWithHole(s, rings[0], irings[0], true)
+      s.beginFace(0)
       capRingWithHole(s, rings[steps], irings[steps], false)
     } else {
+      s.beginFace(bottomFace)
       capFan(s, rings[0].map { floatArrayOf(it[0], it[1], it[2], it[6], it[7]) }, true, 0.5f, 0.5f)
       capFan(s, rings[steps].map { floatArrayOf(it[0], it[1], it[2], it[6], it[7]) }, false, 0.5f, 0.5f)
     }
     if (outerOpen) {
+      s.beginFace(bottomFace + 1)
       closeProfileCut(s, rings, 0, true)
+      s.beginFace(bottomFace + 2)
       closeProfileCut(s, rings, outer.size - 1, false)
     }
     return soupToMesh(s)
@@ -505,6 +525,13 @@ object PrimShapes {
     }
     val closed = k.pathBegin <= 0.001f && k.pathEnd >= 0.999f
     val segs = if (closed) steps else steps
+    val outerFaceCount = when (k.prof) {
+      1 -> 4
+      2, 3, 4 -> 3
+      else -> 1
+    }
+    val hollowFace = outerFaceCount + 1
+    val endFace = if (inner.isNotEmpty()) hollowFace + 1 else outerFaceCount + 1
     var i = 0
     while (i < outer.size) {
       val j = (i + 1) % outer.size
@@ -532,7 +559,9 @@ object PrimShapes {
       i++
     }
     if (!closed) {
+      s.beginFace(endFace)
       capFan(s, rings[0].map { floatArrayOf(it[0], it[1], it[2], it[6], it[7]) }, true, 0.5f, 0.5f)
+      s.beginFace(0)
       capFan(s, rings[steps].map { floatArrayOf(it[0], it[1], it[2], it[6], it[7]) }, false, 0.5f, 0.5f)
     }
     return soupToMesh(s)
@@ -552,7 +581,7 @@ object PrimShapes {
       out.put(u).put(v)
     }
     out.position(0)
-    return Mesh(out, srcMesh.count)
+    return Mesh(out, srcMesh.count, srcMesh.faceRanges)
   }
   private fun soupToMesh(s: Soup): Mesh? {
     if (s.n == 0) { try { nFailGeo++ } catch(_: Throwable) {}; return null }
@@ -560,6 +589,17 @@ object PrimShapes {
     val bb = ByteBuffer.allocateDirect(s.d.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
     for (v in s.d) bb.put(v)
     bb.position(0)
-    return Mesh(bb, s.n * 3)
+    val ranges = mutableListOf<FaceRange>()
+    if (s.triFaces.size == s.n) {
+      var triStart = 0
+      while (triStart < s.triFaces.size) {
+        val face = s.triFaces[triStart]
+        var triEnd = triStart + 1
+        while (triEnd < s.triFaces.size && s.triFaces[triEnd] == face) triEnd++
+        ranges.add(FaceRange(face, triStart * 3, (triEnd - triStart) * 3))
+        triStart = triEnd
+      }
+    }
+    return Mesh(bb, s.n * 3, ranges)
   }
 }

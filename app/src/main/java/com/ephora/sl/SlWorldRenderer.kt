@@ -104,16 +104,23 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var frPrev = LinkedHashSet<Long>()
   private var lastFrDiff = 0L
   private fun probeTex(o: PrimDecoder.Prim): String {
-    var u = ""
-    try { u = o.texFaces.firstOrNull()?.uuid ?: o.tex } catch(_: Throwable) {}
-    try { if (u == NULL_TEXTURE_UUID) return "" } catch(_: Throwable) { return "" }
-    return u
+    try {
+      for (tf in o.texFaces) {
+        val u = tf.uuid
+        if (u.isNotEmpty() && u != NULL_TEXTURE_UUID) return u
+      }
+    } catch(_: Throwable) {}
+    return try { if (o.tex != NULL_TEXTURE_UUID) o.tex else "" } catch(_: Throwable) { "" }
   }
   private fun texHit(o: PrimDecoder.Prim): Boolean {
-    var u = ""
-    try { u = probeTex(o) } catch(_: Throwable) {}
-    try { if (u.isEmpty()) return false } catch(_: Throwable) { return false }
-    try { return glTextures.containsKey(u.lowercase()) } catch(_: Throwable) { return false }
+    try {
+      for (tf in o.texFaces) {
+        val u = tf.uuid
+        if (u.isNotEmpty() && u != NULL_TEXTURE_UUID && glTextures.containsKey(u.lowercase())) return true
+      }
+    } catch(_: Throwable) {}
+    val u = try { o.tex } catch(_: Throwable) { "" }
+    return u.isNotEmpty() && u != NULL_TEXTURE_UUID && glTextures.containsKey(u.lowercase())
   }
   private fun sid(s: String, o: PrimDecoder.Prim): String {
     return s + (if (s.isEmpty()) "" else " ") + o.id.toString() + ":" + "%.0f,%.0f,%.0f".format(o.x, o.y, o.z)
@@ -410,12 +417,25 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
           }
         } else if (o.meshId.isEmpty() && shaped != null) {
           val face0 = o.texFaces.firstOrNull()
-          val tex0 = face0?.uuid?.takeUnless { it == NULL_TEXTURE_UUID } ?: o.tex
-          val tint0 = if (face0 != null) floatArrayOf(face0.r, face0.g, face0.b, face0.a) else color
-          drawMesh(shaped.buf, shaped.count, x, y, z, sx, sy, sz, o.yaw, tint0, tex0,
-            face0?.scaleS ?: o.texScaleS, face0?.scaleT ?: o.texScaleT,
-            face0?.offsetS ?: o.texOffsetS, face0?.offsetT ?: o.texOffsetT,
-            face0?.rotation ?: o.texRotation,face0?.texGen ?: 0,0,pose.qx,pose.qy,pose.qz,pose.qw)
+          if (shaped.faceRanges.isEmpty()) {
+            val tex0 = face0?.uuid?.takeUnless { it == NULL_TEXTURE_UUID } ?: o.tex
+            val tint0 = if (face0 != null) floatArrayOf(face0.r, face0.g, face0.b, face0.a) else color
+            drawMesh(shaped.buf, shaped.count, x, y, z, sx, sy, sz, o.yaw, tint0, tex0,
+              face0?.scaleS ?: o.texScaleS, face0?.scaleT ?: o.texScaleT,
+              face0?.offsetS ?: o.texOffsetS, face0?.offsetT ?: o.texOffsetT,
+              face0?.rotation ?: o.texRotation, face0?.texGen ?: 0, 0, pose.qx,pose.qy,pose.qz,pose.qw)
+          } else {
+            for (range in shaped.faceRanges) {
+              val tf = o.texFaces.getOrNull(range.primFace) ?: face0
+              val tex = tf?.uuid?.takeUnless { it == NULL_TEXTURE_UUID } ?: o.tex
+              val tint = if (tf != null) floatArrayOf(tf.r, tf.g, tf.b, tf.a) else color
+              drawMesh(shaped.buf, range.vertexCount, x, y, z, sx, sy, sz, o.yaw, tint, tex,
+                tf?.scaleS ?: o.texScaleS, tf?.scaleT ?: o.texScaleT,
+                tf?.offsetS ?: o.texOffsetS, tf?.offsetT ?: o.texOffsetT,
+                tf?.rotation ?: o.texRotation, tf?.texGen ?: 0, range.firstVertex,
+                pose.qx,pose.qy,pose.qz,pose.qw)
+            }
+          }
         } else if (isAvatar) {
           drawMesh(mesh, vertexCount, x, y, z, sx, sy, sz, o.yaw, color)
         } else {
