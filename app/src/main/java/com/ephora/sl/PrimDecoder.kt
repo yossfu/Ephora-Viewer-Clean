@@ -524,7 +524,7 @@ object PrimDecoder {
   var texEmitSesion = 0L
   var onTexLine: ((String) -> Unit)? = null
   fun texIdsReset() { try { synchronized(recs) { texIds.clear() } } catch(_: Throwable) {} }
-  fun texList(ax: Double = 0.0, ay: Double = 0.0, az: Double = 0.0): List<String> {
+  fun texList(ax: Double = 0.0, ay: Double = 0.0, az: Double = 0.0, maxIds: Int = WorldRenderConfig.TEXTURE_IDS_WINDOW): List<String> {
     try {
       val seen = LinkedHashSet<String>()
       synchronized(recs) {
@@ -532,7 +532,9 @@ object PrimDecoder {
         for (r in sorted) {
           val ids = if (r.texFaces.isEmpty()) listOf(r.tex) else r.texFaces.map { it.uuid }
           for (id in ids) {
-            if (id.isNotEmpty() && id != "00000000-0000-0000-0000-000000000000" && seen.add(id)) { if (seen.size >= 256) return seen.toList() }
+            if (id.isNotEmpty() && id != "00000000-0000-0000-0000-000000000000" && seen.add(id)) {
+              if (seen.size >= maxIds.coerceAtLeast(1)) return seen.toList()
+            }
           }
         }
       }
@@ -1457,11 +1459,14 @@ object PrimDecoder {
           !viewerRelative
         }.toList()
         try { recsLast = all.size } catch (_: Throwable) {}
-        val ready = all.filter { r -> r.tipo == 47 || r.hasShape || r.meshId.isNotEmpty() }
-          .sortedBy { r -> (r.x - ax) * (r.x - ax) + (r.y - ay) * (r.y - ay) + (r.z - az) * (r.z - az) }
-        val pending = all.filter { r -> r.tipo != 47 && !r.hasShape && r.meshId.isEmpty() }
-          .sortedBy { r -> (r.x - ax) * (r.x - ax) + (r.y - ay) * (r.y - ay) + (r.z - az) * (r.z - az) }
-        val sorted = ready + pending
+        // Distance is the primary interest rule. Readiness is not allowed to
+        // push a nearby wall/object behind a far object that happens to be decoded.
+        // This mirrors the viewer's interest/priority model: nearest world first.
+        val sorted = all.sortedBy { r ->
+          (r.x - ax) * (r.x - ax) +
+            (r.y - ay) * (r.y - ay) +
+            (r.z - az) * (r.z - az)
+        }
         if (recs.size > 4000) {
           var i = 0
           for (r in sorted) {
@@ -1473,7 +1478,7 @@ object PrimDecoder {
             }
           }
         }
-        val pub = sorted.take(1800).map { r -> r.copy() }
+        val pub = sorted.take(WorldRenderConfig.OBJECT_PUBLISH_BUDGET).map { r -> r.copy() }
         try { pubLast = pub.size } catch (_: Throwable) {}
         try { pubAx = ax } catch(_: Throwable) {}
         try { pubAy = ay } catch(_: Throwable) {}
