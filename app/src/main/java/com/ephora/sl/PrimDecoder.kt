@@ -964,24 +964,12 @@ object PrimDecoder {
             i = readCstr(blk, i) ?: throw IndexOutOfBoundsException("media")
           }
           if ((flags and 0x08) != 0) i += 86 // ParticleSystem fixed payload in the legacy compressed wire format
-          // ExtraParams is not a byte-length-prefixed blob. ObjectUpdateCompressed
-          // carries: count:u8, then for each param type:u16 + length:u32 + payload.
-          // Consume the complete structure before Sound/NameValue/ConstructionData.
-          val extraStart = i
-          if (i >= blk.size) throw IndexOutOfBoundsException("extra-count")
-          val extraCount = blk[i].toInt() and 0xFF
+          if (i >= blk.size) throw IndexOutOfBoundsException("extra-len")
+          val extraLen = blk[i].toInt() and 255
           i += 1
-          var extraIndex = 0
-          while (extraIndex < extraCount) {
-            if (i + 6 > blk.size) throw IndexOutOfBoundsException("extra-header")
-            i += 2 // ExtraParamType U16
-            val paramLen = ByteBuffer.wrap(blk, i, 4).order(ByteOrder.LITTLE_ENDIAN).int.toLong() and 0xFFFFFFFFL
-            i += 4
-            if (paramLen > (blk.size - i).toLong()) throw IndexOutOfBoundsException("extra-payload")
-            i += paramLen.toInt()
-            extraIndex++
-          }
-          val extra = blk.copyOfRange(extraStart, i)
+          if (i + extraLen > blk.size) throw IndexOutOfBoundsException("extra")
+          val extra = blk.copyOfRange(i, i + extraLen)
+          i += extraLen
           if ((flags and 0x10) != 0) i += 41 // sound UUID + gain + flags + radius
           if ((flags and 0x100) != 0) i = readCstr(blk, i) ?: throw IndexOutOfBoundsException("namevalues")
           if (i + 23 > blk.size) throw IndexOutOfBoundsException("shape23")
