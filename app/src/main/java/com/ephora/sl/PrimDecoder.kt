@@ -1057,7 +1057,6 @@ object PrimDecoder {
         // ObjectUpdate: ParentID + UpdateFlags precede the 23-byte ConstructionData.
         if (o + 8 > p.size) { try { stashFullMu("parent-flags", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
         val parentId = ((p[o].toInt() and 255) or ((p[o + 1].toInt() and 255) shl 8) or ((p[o + 2].toInt() and 255) shl 16) or ((p[o + 3].toInt() and 255) shl 24)).toLong() and 0xFFFFFFFFL
-        val updateFlags = (p[o + 4].toInt() and 255) or ((p[o + 5].toInt() and 255) shl 8) or ((p[o + 6].toInt() and 255) shl 16) or ((p[o + 7].toInt() and 255) shl 24)
         val updateFlags = ((p[o + 4].toInt() and 255) or ((p[o + 5].toInt() and 255) shl 8) or ((p[o + 6].toInt() and 255) shl 16) or ((p[o + 7].toInt() and 255) shl 24))
         o += 8
         synchronized(recs) { recs[id]?.parentId = parentId }
