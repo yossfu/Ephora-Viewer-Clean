@@ -204,6 +204,9 @@ object TexFetch {
               if (ImageAssets.acceptHttpJ2c(uuid, bytes)) {
                 httpOk++
                 try { AgentLoop.onTick?.invoke("TEX-HTTP-OK id8=" + uuid.take(8) + " bytes=" + bytes.size + " code=" + resp.code) } catch(_: Throwable) {}
+              } else {
+                httpFail++
+                try { AgentLoop.onTick?.invoke("TEX-HTTP-FAIL id8=" + uuid.take(8) + " cause=cache-rechazado") } catch(_: Throwable) {}
               }
             } else {
               httpFail++
