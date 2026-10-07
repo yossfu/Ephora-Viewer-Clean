@@ -277,7 +277,7 @@ object AgentLoop {
       if (s.agentId.isBlank() || s.sessionId.isBlank() || s.simPort == 0) return false
 
       val now = System.currentTimeMillis()
-      val ids = (TerrainComposition.textureIds() + PrimDecoder.texList(px, py, pz)).distinct()
+      val ids = (TerrainComposition.textureIds() + PrimDecoder.texList(px, py, pz) + AvatarAppearanceState.textures()).filter { it.isNotBlank() }.distinct()
 
       var active = 0
       for (u in imgReqSent) {
