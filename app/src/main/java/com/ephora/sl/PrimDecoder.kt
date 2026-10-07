@@ -4,7 +4,7 @@ import java.nio.ByteOrder
 import java.util.Locale
 object PrimDecoder {
   data class TextureFace(val uuid: String, val scaleS: Float, val scaleT: Float, val offsetS: Float, val offsetT: Float, val rotation: Float, val r: Float, val g: Float, val b: Float, val a: Float, val texGen: Int = 0)
-  data class Prim(val id: Long, var tipo: Int, var x: Double, var y: Double, var z: Double, var sx: Float, var sy: Float, var sz: Float, var yaw: Float, var seen: Long, var rotX: Float = 0f, var rotY: Float = 0f, var rotZ: Float = 0f, var rotW: Float = 1f, var mat: Int = -1, var tex: String = "", var texScaleS: Float = 1f, var texScaleT: Float = 1f, var texOffsetS: Float = 0f, var texOffsetT: Float = 0f, var texRotation: Float = 0f, var texR: Float = 1f, var texG: Float = 1f, var texB: Float = 1f, var texA: Float = 1f, var texFaces: List<TextureFace> = emptyList(), var pathCurve: Int = 0x10, var profileCurve: Int = 0x01, var meshId: String = "", var hasShape: Boolean = false, var shPb: Float = 0f, var shPe: Float = 1f, var shPsx: Float = 1f, var shPsy: Float = 1f, var shShx: Float = 0f, var shShy: Float = 0f, var shTw: Float = 0f, var shTwb: Float = 0f, var shRo: Float = 0f, var shTpx: Float = 0f, var shTpy: Float = 0f, var shRev: Float = 0f, var shSk: Float = 0f, var shQb: Float = 0f, var shQe: Float = 1f, var shQh: Float = 0f, var parentId: Long = 0L)
+  data class Prim(val id: Long, var tipo: Int, var x: Double, var y: Double, var z: Double, var sx: Float, var sy: Float, var sz: Float, var yaw: Float, var seen: Long, var rotX: Float = 0f, var rotY: Float = 0f, var rotZ: Float = 0f, var rotW: Float = 1f, var mat: Int = -1, var tex: String = "", var texScaleS: Float = 1f, var texScaleT: Float = 1f, var texOffsetS: Float = 0f, var texOffsetT: Float = 0f, var texRotation: Float = 0f, var texR: Float = 1f, var texG: Float = 1f, var texB: Float = 1f, var texA: Float = 1f, var texFaces: List<TextureFace> = emptyList(), var pathCurve: Int = 0x10, var profileCurve: Int = 0x01, var meshId: String = "", var hasShape: Boolean = false, var shPb: Float = 0f, var shPe: Float = 1f, var shPsx: Float = 1f, var shPsy: Float = 1f, var shShx: Float = 0f, var shShy: Float = 0f, var shTw: Float = 0f, var shTwb: Float = 0f, var shRo: Float = 0f, var shTpx: Float = 0f, var shTpy: Float = 0f, var shRev: Float = 0f, var shSk: Float = 0f, var shQb: Float = 0f, var shQe: Float = 1f, var shQh: Float = 0f, var parentId: Long = 0L, var avatarUuid: String = "")
   var nTerse = 0L
   var nComp = 0L
   var nFull = 0L
@@ -371,8 +371,8 @@ object PrimDecoder {
         val c = colors[i]
         val mg = media?.get(i)?.getOrNull(0)?.toInt()?.and(0x06) ?: 0
         return TextureFace(uuid, sc, tc, so / 32767f, to / 32767f, (ro / 32768f) * (Math.PI * 2.0).toFloat(),
-          (255 - (c[0].toInt() and 255)) / 255f, (255 - (c[1].toInt() and 255)) / 255f,
-          (255 - (c[2].toInt() and 255)) / 255f, (255 - (c[3].toInt() and 255)) / 255f, mg)
+          (c[0].toInt() and 255) / 255f, (c[1].toInt() and 255) / 255f,
+          (c[2].toInt() and 255) / 255f, (255 - (c[3].toInt() and 255)) / 255f, mg)
       }
       return TextureEntryFields((0 until 45).map(::makeFace))
     } catch (_: Throwable) { return null }
@@ -618,7 +618,7 @@ object PrimDecoder {
     id: Long,tipo: Int,x: Double,y: Double,z: Double,
     sx: Float,sy: Float,sz: Float,yw: Float,now: Long,
     mat: Int=-1,tex: String="",parentId: Long=-1L,
-    rotX: Float=0f,rotY: Float=0f,rotZ: Float=0f,rotW: Float=1f
+    rotX: Float=0f,rotY: Float=0f,rotZ: Float=0f,rotW: Float=1f, avatarUuid:String=""
   ){
     try{synchronized(recs){
       val old=recs[id]
@@ -631,7 +631,7 @@ object PrimDecoder {
         val l=kotlin.math.sqrt(rotX*rotX+rotY*rotY+rotZ*rotZ+rotW*rotW).coerceAtLeast(1e-6f)
         r.rotX=rotX/l;r.rotY=rotY/l;r.rotZ=rotZ/l;r.rotW=rotW/l
       }
-      r.seen=now;if(parentId>=0L)r.parentId=parentId;if(mat>=0)r.mat=mat;if(tex.isNotEmpty())r.tex=tex
+      r.seen=now;if(parentId>=0L)r.parentId=parentId;if(mat>=0)r.mat=mat;if(tex.isNotEmpty())r.tex=tex;if(avatarUuid.isNotEmpty())r.avatarUuid=avatarUuid
     }}catch(_:Throwable){}
   }
 
@@ -990,7 +990,7 @@ object PrimDecoder {
               throw IndexOutOfBoundsException("textureEntry")
             }
           }
-          put(id,pcode,x,y,z,sx,sy,sz,yaw,now,mat,parentId=parentId,rotX=qx,rotY=qy,rotZ=qz,rotW=qw)
+          put(id,pcode,x,y,z,sx,sy,sz,yaw,now,mat,parentId=parentId,rotX=qx,rotY=qy,rotZ=qz,rotW=qw,avatarUuid=fullIdHex)
           synchronized(recs) { recs[id]?.let { applyShapeLocked(it, shape) } }
           decodeTextureAndMesh(id, texRaw, extra)
           censoAdd(censoComp, id)
