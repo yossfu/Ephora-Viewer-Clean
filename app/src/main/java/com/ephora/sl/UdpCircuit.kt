@@ -273,7 +273,7 @@ object UdpCircuit {
     p.put(uuidBE(imageUuid))
     p.order(ByteOrder.LITTLE_ENDIAN)
     p.put(0.toByte())
-    p.putFloat(100000f)
+    p.putFloat(1013000f)
     p.putInt(packet)
     p.put(type.toByte())
     return h + p.array()
