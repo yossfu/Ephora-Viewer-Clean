@@ -426,6 +426,14 @@
                 android:textSize="12sp"
                 android:textColor="#22D3EE"
                 android:background="@drawable/btn_dark" />
+            <com.ephora.sl.VirtualJoystickView
+                android:id="@+id/joystick3d"
+                android:layout_width="180dp"
+                android:layout_height="180dp"
+                android:layout_gravity="bottom|start"
+                android:layout_marginStart="18dp"
+                android:layout_marginBottom="24dp"
+                android:importantForAccessibility="no" />
 
         </FrameLayout>
     </FrameLayout>
