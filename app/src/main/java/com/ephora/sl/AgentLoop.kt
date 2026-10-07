@@ -12,6 +12,41 @@ object AgentLoop {
   var lastTick = ""
   var onTick: ((String) -> Unit)? = null
   @Volatile var controlFlags = 0
+  @Volatile var joystickX = 0f
+  @Volatile var joystickY = 0f
+  @Volatile var cameraYaw = 0f
+  @Volatile var bodyYaw = 0f
+
+  fun setJoystick(x: Float, y: Float) {
+    val len = kotlin.math.sqrt(x * x + y * y)
+    if (len > 1f && len.isFinite()) {
+      joystickX = x / len
+      joystickY = y / len
+    } else {
+      joystickX = x.coerceIn(-1f, 1f)
+      joystickY = y.coerceIn(-1f, 1f)
+    }
+  }
+
+  private fun wrapAngle(a: Float): Float {
+    var v = a
+    while (v > Math.PI.toFloat()) v = (v - (Math.PI * 2.0)).toFloat()
+    while (v < -Math.PI.toFloat()) v = (v + (Math.PI * 2.0)).toFloat()
+    return v
+  }
+
+  private fun mergedControlFlags(): Int {
+    var f = controlFlags
+    val x = joystickX
+    val y = joystickY
+    if (x < -0.12f) f = f or 4
+    if (x > 0.12f) f = f or 8
+    if (y < -0.12f) f = f or 1
+    if (y > 0.12f) f = f or 2
+    if (kotlin.math.abs(y) > 0.82f) f = f or 0x00000400
+    if (kotlin.math.abs(x) > 0.82f) f = f or 0x00000800
+    return f
+  }
   var px = 128.0
   var py = 128.0
   var pz = 25.0
@@ -715,12 +750,13 @@ object AgentLoop {
           val now = System.currentTimeMillis()
           val dt = ((now - last).coerceIn(1L, 500L)) / 1000.0
           last = now
-          val f = controlFlags
+          val f = mergedControlFlags()
+          bodyYaw = wrapAngle(cameraYaw + Math.PI.toFloat())
           if (now - lastAuSend >= 100L) {
             lastAuSend = now
           try {
             val cv = camVec
-            val b = UdpCircuit.agentUpdate(s.agentId, s.sessionId, f, cv[0], cv[1], cv[2], 256f, cv[3], cv[4], cv[5], cv[6], cv[7], cv[8], cv[9], cv[10], cv[11])
+            val b = UdpCircuit.agentUpdate(s.agentId, s.sessionId, f, cv[0], cv[1], cv[2], 512f, cv[3], cv[4], cv[5], cv[6], cv[7], cv[8], cv[9], cv[10], cv[11], bodyYaw, bodyYaw)
             sock.send(DatagramPacket(b, b.size, addr, s.simPort))
             tx++
             val hx = UdpCircuit.txHex("AgentUpdate", UdpCircuit.lastSeq(), b)
@@ -730,11 +766,24 @@ object AgentLoop {
           }
           if (f != 0) {
             if (!movOn) { movOn = true; movFlags = f; sx = px; sy = py; sz = pz }
-            val v = 3.2 * dt
-            if ((f and 1) != 0) px += v
-            if ((f and 2) != 0) px -= v
-            if ((f and 4) != 0) py -= v
-            if ((f and 8) != 0) py += v
+            val jx = joystickX
+            val jy = joystickY
+            val mag = kotlin.math.sqrt(jx * jx + jy * jy).coerceIn(0f, 1f)
+            if (mag > 0.02f) {
+              val forward = -jy.toDouble()
+              val strafe = jx.toDouble()
+              val speed = 3.2 * (if (mag > 0.82f) 1.20 else 1.0)
+              val cy = kotlin.math.cos(bodyYaw.toDouble())
+              val sy = kotlin.math.sin(bodyYaw.toDouble())
+              px += (cy * forward - sy * strafe) * speed * dt
+              py += (sy * forward + cy * strafe) * speed * dt
+            } else {
+              val v = 3.2 * dt
+              if ((controlFlags and 1) != 0) px += v
+              if ((controlFlags and 2) != 0) px -= v
+              if ((controlFlags and 4) != 0) py -= v
+              if ((controlFlags and 8) != 0) py += v
+            }
           } else if (movOn) {
             movOn = false
             try { onTick?.invoke("MOV flags=" + movFlags + " pos=" + "%.1f,%.1f,%.1f".format(sx, sy, sz) + "->" + posStr() + " coarse=" + (if (coarseSeen) "si" else "no")) } catch(_: Throwable) {}
@@ -816,6 +865,15 @@ object AgentLoop {
             burstMax = 0
           }
           if (now % 2000L < 25L) { try { retryMissingImagePackets("tick") } catch(_: Throwable) {} }
+          if (now % 5000L < 30L) {
+            try {
+              if (loopSock != null && loopAddr != null) {
+                val visibleTextures = (TerrainComposition.textureIds() + PrimDecoder.texList(px, py, pz)).distinct()
+                TexFetch.requestVisible(visibleTextures, 32)
+                sendImageReqBody("visible5s")
+              }
+            } catch(_: Throwable) {}
+          }
           if (now - t0 >= 10000) {
             t0 = now
             lastTick = "tick10s tx=" + tx
