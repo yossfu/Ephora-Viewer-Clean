@@ -1,0 +1,27 @@
+name: Export exact source ZIP
+
+on:
+  push:
+    branches:
+      - export-source-protocol-fix-v1
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create exact source archive
+        run: |
+          git archive --format=zip --output=Ephora-SL-protocol-fix-v1-SOURCE.zip 96385cd235ceb889d41bff26767e7b1a2387f5f9
+          unzip -t Ephora-SL-protocol-fix-v1-SOURCE.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Ephora-SL-protocol-fix-v1-SOURCE
+          path: Ephora-SL-protocol-fix-v1-SOURCE.zip
