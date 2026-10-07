@@ -159,7 +159,8 @@ object AvatarAppearanceState {
     if (data.size < 16) return emptyList()
     val out = MutableList(32) { "" }
     var o = 0
-    out[0] = uuidString(data, o)
+    val defaultId = uuidString(data, o)
+    for (i in out.indices) out[i] = defaultId
     o += 16
 
     fun readBitfield(): Long {
