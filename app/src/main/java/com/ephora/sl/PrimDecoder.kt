@@ -371,8 +371,8 @@ object PrimDecoder {
         val c = colors[i]
         val mg = media?.get(i)?.getOrNull(0)?.toInt()?.and(0x06) ?: 0
         return TextureFace(uuid, sc, tc, so / 32767f, to / 32767f, (ro / 32768f) * (Math.PI * 2.0).toFloat(),
-          (255 - (c[0].toInt() and 255)) / 255f, (255 - (c[1].toInt() and 255)) / 255f,
-          (255 - (c[2].toInt() and 255)) / 255f, (255 - (c[3].toInt() and 255)) / 255f, mg)
+          (c[0].toInt() and 255) / 255f, (c[1].toInt() and 255) / 255f,
+          (c[2].toInt() and 255) / 255f, (c[3].toInt() and 255) / 255f, mg)
       }
       return TextureEntryFields((0 until 45).map(::makeFace))
     } catch (_: Throwable) { return null }
@@ -1426,18 +1426,18 @@ object PrimDecoder {
         val pending = all.filter { r -> r.tipo != 47 && !r.hasShape && r.meshId.isEmpty() }
           .sortedBy { r -> (r.x - ax) * (r.x - ax) + (r.y - ay) * (r.y - ay) + (r.z - az) * (r.z - az) }
         val sorted = ready + pending
-        if (recs.size > 4000) {
+        if (recs.size > 8192) {
           var i = 0
           for (r in sorted) {
             i += 1
-            if (i > 4000) {
+            if (i > 8192) {
               try { noteEvict(r, ax, ay, az) } catch(_: Throwable) {}
               try { recs.remove(r.id) } catch(_: Throwable) {}
               try { nEvict++ } catch(_: Throwable) {}
             }
           }
         }
-        val pub = sorted.take(1800).map { r -> r.copy() }
+        val pub = sorted.take(4096).map { r -> r.copy() }
         try { pubLast = pub.size } catch (_: Throwable) {}
         try { pubAx = ax } catch(_: Throwable) {}
         try { pubAy = ay } catch(_: Throwable) {}
