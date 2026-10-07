@@ -188,6 +188,7 @@ object UdpCircuit {
   fun msgName(id: Int): String {
     return when (id) {
       1 -> "StartPingCheck"
+      158 -> "AvatarAppearance"
       2 -> "CompletePingCheck"
       4 -> "AgentUpdate"
       0xFF06 -> "CoarseLocationUpdate"
