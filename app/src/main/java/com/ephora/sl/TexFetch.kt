@@ -161,11 +161,19 @@ object TexFetch {
     }
   }
 
-  private fun fetch(request: Request): Boolean {
-    val bases = textureBaseUrls()
-    if (bases.isEmpty()) return false
+  private suspend fun fetch(request: Request): Boolean {
+    if (textureBaseUrls().isEmpty()) return false
 
-    for ((index, base) in bases.withIndex()) {
+    // Asset URLs are region-scoped. A 403 on a previously valid URL can mean
+    // the ViewerAsset/CDN capability became stale after a region transition.
+    // Reacquire caps once (bounded by CapsManager) and retry against fresh URLs.
+    var refreshed = false
+    while (true) {
+      val bases = textureBaseUrls()
+      if (bases.isEmpty()) return false
+      var retryWithFreshCaps = false
+
+      for ((index, base) in bases.withIndex()) {
       val url = base.trimEnd('/') + "/?texture_id=" + request.uuid
       try {
         val http = okhttp3.Request.Builder()
@@ -187,6 +195,9 @@ object TexFetch {
             !response.isSuccessful -> {
               httpFail++
               lastError = "HTTP" + response.code
+              if (response.code == 403 && !refreshed) {
+                retryWithFreshCaps = true
+              }
             }
 
             else -> {
@@ -221,6 +232,15 @@ object TexFetch {
         httpFail++
         lastError = e::class.java.simpleName + ":" + (e.message ?: "").take(120)
       }
+      if (retryWithFreshCaps) break
+    }
+
+    if (retryWithFreshCaps && !refreshed) {
+      refreshed = true
+      try {
+        val ok = CapsManager.refreshTextureCaps("HTTP403")
+        if (ok) continue
+      } catch (_: Throwable) {}
     }
     return false
   }
