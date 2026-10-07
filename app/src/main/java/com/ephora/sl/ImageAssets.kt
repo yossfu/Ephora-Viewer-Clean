@@ -308,6 +308,11 @@ object ImageAssets {
   }
 
   @Synchronized fun bitmap(uuid: String): Bitmap? = bitmaps[uuid.lowercase()]
+  /** Return a stable upload snapshot so the LRU can recycle its cached bitmap safely. */
+  @Synchronized fun bitmapCopy(uuid: String): Bitmap? {
+    val src = bitmaps[uuid.lowercase()] ?: return null
+    return try { src.copy(Bitmap.Config.ARGB_8888, false) } catch (_: Throwable) { null }
+  }
   @Synchronized fun has(uuid: String): Boolean = bitmaps.containsKey(uuid.lowercase())
   @Synchronized fun bitmapCount(): Int = bitmaps.size
   @Synchronized fun rawCount(): Int = raw.size
