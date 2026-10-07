@@ -34,7 +34,7 @@ object ImageAssets {
     val parts: TreeMap<Int, ByteArray> = TreeMap(),
     var receivedBytes: Int = 0,
     var lastReceivedMs: Long = 0L,
-    var lastRetryMs: Long = 0L
+    var lastRetryMs: Long = 0L,
     var retries: Int = 0
   ) {
     fun addPart(packet: Int, bytes: ByteArray) {
