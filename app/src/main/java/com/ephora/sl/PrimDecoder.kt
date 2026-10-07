@@ -600,7 +600,27 @@ object PrimDecoder {
   }
   // CITA-SEMANTICA attachments/HUD: el visor los posiciona relativos al avatar (coords ~0 o levemente negativas), no son prims de region: se cuentan aparte, ni render ni fuera.
   private fun applyShapeLocked(r: Prim, sh: ShapeData) {
-    r.pathCurve = sh.pathCurve; r.profileCurve = sh.profileCurve; r.hasShape = true
+    // Only PCode 9 is a constructed SL primitive. Trees/grass/etc. must not be
+    // fed through the prim shape generator as if they were boxes.
+    if (r.tipo != 9) {
+      r.hasShape = false
+      return
+    }
+    // PathCurve uses only the upper nibble. Zero/unknown is not a valid extrusion
+    // path for a prim; the simulator/default primitive is a straight path.
+    r.pathCurve = when (sh.pathCurve and 0xF0) {
+      0x10 -> 0x10
+      0x20 -> 0x20
+      0x30 -> 0x30
+      0x80 -> 0x80
+      else -> 0x10
+    }
+    val prof = sh.profileCurve and 0x0F
+    val hole = sh.profileCurve and 0xF0
+    val profSafe = if (prof in 0..5) prof else 1
+    val holeSafe = if (hole == 0 || hole == 0x10 || hole == 0x20 || hole == 0x30) hole else 0
+    r.profileCurve = holeSafe or profSafe
+    r.hasShape = true
     r.shPb = sh.pb; r.shPe = sh.pe; r.shPsx = sh.psx; r.shPsy = sh.psy
     r.shShx = sh.shx; r.shShy = sh.shy; r.shTw = sh.tw; r.shTwb = sh.twb
     r.shRo = sh.ro; r.shTpx = sh.tpx; r.shTpy = sh.tpy; r.shRev = sh.rev; r.shSk = sh.sk
