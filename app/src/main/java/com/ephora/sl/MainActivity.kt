@@ -113,6 +113,10 @@ class MainActivity : ComponentActivity() {
     val view3d = findViewById<View>(R.id.view3d)
     val surface3d = findViewById<GLSurfaceView>(R.id.surface3d)
     val btn3dExit = findViewById<Button>(R.id.btn3dExit)
+    val joy3dF = findViewById<Button>(R.id.joy3dF)
+    val joy3dB = findViewById<Button>(R.id.joy3dB)
+    val joy3dL = findViewById<Button>(R.id.joy3dL)
+    val joy3dR = findViewById<Button>(R.id.joy3dR)
     // Register the renderer while the GLSurfaceView is still hidden. If setRenderer()
     // runs only after revealing this SurfaceView, Android may deliver surfaceCreated
     // before GLSurfaceView has a GLThread to receive it; a later activity resume then
@@ -195,6 +199,7 @@ class MainActivity : ComponentActivity() {
       }
     }
     hold(joyF, 1); hold(joyB, 2); hold(joyL, 4); hold(joyR, 8)
+    hold(joy3dF, 1); hold(joy3dB, 2); hold(joy3dL, 4); hold(joy3dR, 8)
     val chatRing = mutableListOf<String>()
     val chatLines = mutableListOf<String>()
     fun convName(id: String): String {
