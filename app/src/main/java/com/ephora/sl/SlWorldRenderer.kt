@@ -319,7 +319,17 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
         return
       }
 
-      if (action == MotionEvent.ACTION_POINTER_UP || action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+      if (action == MotionEvent.ACTION_CANCEL) {
+        releaseJoystick()
+        cameraPointerId = -1
+        return
+      }
+      if (action == MotionEvent.ACTION_POINTER_UP || action == MotionEvent.ACTION_UP) {
+        if (e.pointerCount <= 0) {
+          releaseJoystick()
+          cameraPointerId = -1
+          return
+        }
         val i = e.actionIndex.coerceIn(0, e.pointerCount - 1)
         val id = e.getPointerId(i)
         if (id == joystickPointerId) releaseJoystick()
@@ -327,10 +337,6 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
           cameraPointerId = -1
           if (now - lastTap < 350L) recenter()
           lastTap = now
-        }
-        if (action == MotionEvent.ACTION_CANCEL) {
-          releaseJoystick()
-          cameraPointerId = -1
         }
       }
     } catch (_: Throwable) {}
