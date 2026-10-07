@@ -9,12 +9,22 @@ object TerrainComposition {
   @Volatile var lastError: String? = null
     private set
 
+  @Synchronized fun reset() {
+    details = emptyList()
+    starts = emptyList()
+    ranges = emptyList()
+    lastError = null
+  }
+
   fun textureIds(): List<String> = details.filter { it != NULL_UUID }
   fun detailTextures(): List<String> = details.map { if (it == NULL_UUID) "" else it }
   fun startHeights(): List<Float> = starts
   fun heightRanges(): List<Float> = ranges
   fun baseTexture(): String = details.firstOrNull { it != NULL_UUID }.orEmpty()
-  fun status(): String = "TERRAIN-TEX ids=${details.count { it != NULL_UUID }} base=${baseTexture().take(8).ifEmpty { "-" }} bands=${starts.size}/4 err=${lastError ?: "-"}"
+  fun status(): String {
+    val ids = details.filter { it != NULL_UUID }.map { it.take(8) }
+    return "TERRAIN-TEX ids=${ids.size} base=${baseTexture().take(8).ifEmpty { "-" }} all=${if (ids.isEmpty()) "-" else ids.joinToString(",")} bands=${starts.size}/4 err=${lastError ?: "-"}"
+  }
 
   /** RegionHandshake: parse the fixed RegionInfo block after LLUDP message ID removal. */
   @Synchronized fun accept(payload: ByteArray): String? {

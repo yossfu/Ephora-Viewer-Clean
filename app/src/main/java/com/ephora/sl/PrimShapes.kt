@@ -7,7 +7,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 // CITA-FUENTES formas reales (Official sources, ver FUENTES-OFICIALES.md formas-7.54):
-// - message_template.msg ObjectUpdate High 12: bloque de forma 31B (ParentID+UpdateFlags+17 params).
+// - message_template.msg ObjectUpdate High 12: bloque de construcción 23B (ParentID+UpdateFlags+17 params).
 // - LibreMetaverse Primitive.cs Type-getter: Line+Circle=Cylinder, Line+Square=Box,
 //   Line+Triangulos=Prism, Circle+HalfCircle=Sphere, Circle2+Circle=Sphere,
 //   Circle+Circle=Sphere/Torus, Circle+Square=Tube, Circle+EqualTriangle=Ring.
@@ -22,7 +22,7 @@ object PrimShapes {
   private data class Key(val p: Params)
   private val cache = object : LinkedHashMap<Key, Mesh>(128, 0.75f, true) {
     override fun removeEldestEntry(e: MutableMap.MutableEntry<Key, Mesh>): Boolean {
-      return size > 128
+      return size > 256
     }
   }
   @Volatile var budget = 0
@@ -53,7 +53,8 @@ object PrimShapes {
       }
       try { nTry++ } catch(_: Throwable) {}
       if (budget <= 0) return null
-      val m = build(k) ?: return null
+      val built = build(k) ?: return null
+      val m = toRendererSpace(built)
       budget--
       synchronized(cache) {
         cache[Key(k)] = m
@@ -535,6 +536,23 @@ object PrimShapes {
       capFan(s, rings[steps].map { floatArrayOf(it[0], it[1], it[2], it[6], it[7]) }, false, 0.5f, 0.5f)
     }
     return soupToMesh(s)
+  }
+  private fun toRendererSpace(srcMesh: Mesh): Mesh {
+    val src = srcMesh.buf.duplicate()
+    src.position(0)
+    val out = ByteBuffer.allocateDirect(srcMesh.count * 8 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+    repeat(srcMesh.count) {
+      val x = src.get(); val y = src.get(); val z = src.get()
+      val nx = src.get(); val ny = src.get(); val nz = src.get()
+      val u = src.get(); val v = src.get()
+      // SL coordinates: X/Y horizontal, Z vertical. Renderer world: X/Z horizontal, Y vertical.
+      // MeshAssets uses the same basis conversion: (x, y, z, nx, ny, nz) -> (x, z, -y, nx, nz, -ny).
+      out.put(x).put(z).put(-y)
+      out.put(nx).put(nz).put(-ny)
+      out.put(u).put(v)
+    }
+    out.position(0)
+    return Mesh(out, srcMesh.count)
   }
   private fun soupToMesh(s: Soup): Mesh? {
     if (s.n == 0) { try { nFailGeo++ } catch(_: Throwable) {}; return null }

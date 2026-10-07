@@ -16,8 +16,8 @@ import kotlinx.coroutines.launch
 object ImageAssets {
   private const val J2C_IMAGE_CODEC = 2
   private const val MAX_COMPRESSED = 16 * 1024 * 1024
-  private const val MAX_BITMAPS = 128
-  private const val MAX_PENDING = 192
+  private const val MAX_BITMAPS = 256
+  private const val MAX_PENDING = 384
   private data class Pending(var expected: Int = 0, var codec: Int = 0, val parts: TreeMap<Int, ByteArray> = TreeMap(), var touched: Long = 0L, var queued: Boolean = false) {
     fun byteCount(): Int = parts.values.sumOf { it.size }
   }
@@ -38,7 +38,9 @@ object ImageAssets {
 
   @Synchronized fun resetSession() {
     pending.clear(); decoding.clear()
-    packetCount = 0; completeCount = 0; failedCount = 0; lastResult = "reset"
+    for (b in bitmaps.values) { try { b.recycle() } catch (_: Throwable) {} }
+    bitmaps.clear()
+    packetCount = 0; completeCount = 0; decodedCount = 0; failedCount = 0; lastResult = "reset"
   }
 
   fun accept(messageId: Int, payload: ByteArray): String? {
@@ -156,7 +158,12 @@ object ImageAssets {
       try { pending[u]?.touched = now } catch (_: Throwable) {}
     }
   }
-  @Synchronized fun status(): String = "TEX-ASSETS packets=$packetCount complete=$completeCount decoded=$decodedCount failed=$failedCount cache=${bitmaps.size} pending=${pending.size} last=$lastResult"
+  @Synchronized fun keySummary(limit: Int = 10): String {
+    val keys = bitmaps.keys.take(limit).map { it.take(8) }
+    return if (keys.isEmpty()) "-" else keys.joinToString(",")
+  }
+
+  @Synchronized fun status(): String = "TEX-ASSETS packets=$packetCount complete=$completeCount decoded=$decodedCount failed=$failedCount cache=${bitmaps.size} pending=${pending.size} keys=${keySummary()} last=$lastResult"
 
   private fun uuidAt(b: ByteArray): String? {
     if (b.size < 16) return null

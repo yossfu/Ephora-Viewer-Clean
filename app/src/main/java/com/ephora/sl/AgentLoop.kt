@@ -226,7 +226,8 @@ object AgentLoop {
   val imgSeen = LinkedHashSet<String>()
   val imgNoDb = LinkedHashSet<String>()
   fun imgLista(u: String): Boolean {
-    try { if (imgDataOk.contains(u.take(8))) return true } catch (_: Throwable) {}
+    // A reassembled J2C stream is not yet renderable. Only a decoded Bitmap
+    // is a usable asset, so never stop retries merely because UDP assembly finished.
     try { if (ImageAssets.has(u)) return true } catch (_: Throwable) {}
     return false
   }
@@ -309,7 +310,7 @@ object AgentLoop {
       val ad = loopAddr
       if (ad == null) { try { onTick?.invoke("IMAGE-REQ-ERROR sin-destino") } catch(_: Throwable) {}; return false }
       if (s.agentId.isBlank() || s.sessionId.isBlank()) { try { onTick?.invoke("IMAGE-REQ-ERROR sin-sesion") } catch(_: Throwable) {}; return false }
-      val uuids = try { (TerrainComposition.textureIds() + PrimDecoder.texList(px, py, pz)).distinct().take(256) } catch(_: Throwable) { emptyList<String>() }
+      val uuids = try { (TerrainComposition.textureIds() + PrimDecoder.texList(px, py, pz)).distinct().take(768) } catch(_: Throwable) { emptyList<String>() }
       if (uuids.isEmpty()) {
         try { onTick?.invoke("IMAGE-REQ sin-uuid") } catch(_: Throwable) {}
         return false
@@ -339,7 +340,7 @@ object AgentLoop {
           } catch(_: Throwable) {}
           continue
         }
-        if (imgReqSent.size >= 256) break
+        if (imgReqSent.size >= 768) break
         try { java.util.UUID.fromString(u) } catch(_: Throwable) { try { onTick?.invoke("IMAGE-REQ-UUID-MALO u=" + u.take(20)) } catch(_: Throwable) {}; continue }
         val b = UdpCircuit.requestImage(s.agentId, s.sessionId, u)
         val seq = try { ByteBuffer.wrap(b, 1, 4).order(ByteOrder.BIG_ENDIAN).int.toLong() and 0xFFFFFFFFL } catch(_: Throwable) { UdpCircuit.lastSeq() }

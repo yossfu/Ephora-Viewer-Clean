@@ -30,8 +30,8 @@ object MeshAssets {
   private const val MAX_DECOMPRESSED_BYTES = 32 * 1024 * 1024
   // Keep enough recently-used geometry for the active region view. Visible meshes
   // are pinned separately so background requests cannot evict geometry in use.
-  private const val MAX_CACHE_ENTRIES = 96
-  private const val MAX_PENDING = 128
+  private const val MAX_CACHE_ENTRIES = 192
+  private const val MAX_PENDING = 256
   private const val RETRY_BASE_MS = 2500L
   private const val RETRY_MAX_MS = 60000L
   private const val MAX_VERTICES_PER_FACE = 65535
@@ -151,7 +151,7 @@ object MeshAssets {
   /** Refresh the active set each render frame; visible misses are queued ahead of background assets. */
   fun updateVisibleMeshes(meshIds: Collection<String>) {
     val ids = meshIds.asSequence().map { it.trim().lowercase(Locale.US) }
-      .filter(::isUuid).distinct().take(128).toList()
+      .filter(::isUuid).distinct().take(256).toList()
     synchronized(lock) {
       visible.clear()
       visible.addAll(ids)
@@ -206,7 +206,7 @@ object MeshAssets {
       .header("Range", "bytes=$start-$end")
       .header("Accept", "*/*")
       .header("Accept-Encoding", "identity")
-      .header("User-Agent", "EPHORASL/7.70 (Android)")
+      .header("User-Agent", "EPHORASL/7.72 (Android)")
       .build()
     client.newCall(request).execute().use { response ->
       if (!response.isSuccessful) throw IllegalStateException("http-${response.code}")

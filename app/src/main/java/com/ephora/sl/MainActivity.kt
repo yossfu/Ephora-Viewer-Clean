@@ -331,6 +331,7 @@ class MainActivity : ComponentActivity() {
         try { EventQueue.EQLoop.stop() } catch(_: Throwable) {}
         try { PrimDecoder.reset() } catch(_: Throwable) {}
         try { TerrainMesh.reset() } catch(_: Throwable) {}
+        try { TerrainComposition.reset() } catch(_: Throwable) {}
         try { LoginManager.Session.simIp = ip } catch(_: Throwable) {}
         try { LoginManager.Session.simPort = port } catch(_: Throwable) {}
         try { if (seed.isNotBlank()) LoginManager.Session.seedCap = seed } catch(_: Throwable) {}
@@ -413,6 +414,7 @@ class MainActivity : ComponentActivity() {
       try { TexFetch.reset() } catch(_: Throwable) {}
       try { PrimDecoder.reset() } catch(_: Throwable) {}
       try { MeshAssets.resetSession() } catch(_: Throwable) {}
+      try { TerrainComposition.reset() } catch(_: Throwable) {}
       try { gfxOpenLatch = "?" } catch(_: Throwable) {}
       try { gfxExitLatch = "?" } catch(_: Throwable) {}
       try { uiBeatMs = System.currentTimeMillis() } catch(_: Throwable) {}

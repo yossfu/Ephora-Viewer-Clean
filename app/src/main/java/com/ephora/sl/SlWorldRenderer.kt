@@ -52,6 +52,8 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var terrainVersion = -1L
   private var terrainTextureUuid = ""
   private var terrainGpuTextures = 0
+  private var terrainBitmapHits = 0
+  private var terrainBitmapMisses = 0
   private val projection = FloatArray(16)
   private val camera = FloatArray(16)
   private val model = FloatArray(16)
@@ -63,7 +65,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var targetZ = 0.0
   private var orbitYaw = 0.25
   private var orbitPitch = 0.10
-  private var orbitDistance = 6.0
+  private var orbitDistance = 12.0
   private var downX = 0f
   private var downY = 0f
   private var downSpan = 0f
@@ -312,7 +314,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       try { AgentLoop.camVec = floatArrayOf(slEx.toFloat(), slEy.toFloat(), slEz.toFloat(), cax.toFloat(), cay.toFloat(), caz.toFloat(), (-crx).toFloat(), (-cry).toFloat(), (-crz).toFloat(), cux.toFloat(), cuy.toFloat(), cuz.toFloat()) } catch(_: Throwable) {}
       Matrix.multiplyMM(vp, 0, projection, 0, camera, 0)
       drawCount = 0
-      PrimShapes.budget = 180
+      PrimShapes.budget = 1000
       texturedObjects = 0
       meshReferences = 0
       meshObjects = 0
@@ -382,7 +384,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
             val tf = o.texFaces.getOrNull(faceIndex) ?: o.texFaces.firstOrNull()
             val tex = tf?.uuid?.takeUnless { it == NULL_TEXTURE_UUID } ?: o.tex
             val tint = if (tf != null) floatArrayOf(tf.r, tf.g, tf.b, tf.a) else color
-            drawMesh(face.vertices, face.vertexCount, x, y, z, sx, sz, sy, o.yaw, tint, tex,
+            drawMesh(face.vertices, face.vertexCount, x, y, z, sx, sy, sz, o.yaw, tint, tex,
               tf?.scaleS ?: o.texScaleS, tf?.scaleT ?: o.texScaleT,
               tf?.offsetS ?: o.texOffsetS, tf?.offsetT ?: o.texOffsetT, tf?.rotation ?: o.texRotation)
           }
@@ -390,7 +392,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
           val face0 = o.texFaces.firstOrNull()
           val tex0 = face0?.uuid?.takeUnless { it == NULL_TEXTURE_UUID } ?: o.tex
           val tint0 = if (face0 != null) floatArrayOf(face0.r, face0.g, face0.b, face0.a) else color
-          drawMesh(shaped.buf, shaped.count, x, y, z, sx, sz, sy, o.yaw, tint0, tex0, 1f, 1f, 0f, 0f, 0f)
+          drawMesh(shaped.buf, shaped.count, x, y, z, sx, sy, sz, o.yaw, tint0, tex0, 1f, 1f, 0f, 0f, 0f)
         } else if (isAvatar) {
           drawMesh(mesh, vertexCount, x, y, z, sx, sy, sz, o.yaw, color)
         } else {
@@ -462,15 +464,37 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     val id = names[0]
     if (id == 0) return 0
     GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, id)
-    GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
-    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR_MIPMAP_LINEAR)
-    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
-    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_REPEAT)
-    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_REPEAT)
-    GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
+    try {
+      // Clear a stale GL error first; otherwise an unrelated previous draw call
+      // can make a perfectly valid texture upload look like a failure.
+      while (GLES20.glGetError() != GLES20.GL_NO_ERROR) { }
+      GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+      GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+      val pot = fun(v: Int): Boolean = v > 0 && (v and (v - 1)) == 0
+      val isPot = pot(bitmap.width) && pot(bitmap.height)
+      if (isPot) {
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR_MIPMAP_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_REPEAT)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_REPEAT)
+        GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
+      } else {
+        // GLES2 does not guarantee REPEAT+mipmap for NPOT textures.
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+      }
+      val err = GLES20.glGetError()
+      if (err != GLES20.GL_NO_ERROR) {
+        GLES20.glDeleteTextures(1, intArrayOf(id), 0)
+        return 0
+      }
+    } catch (_: Throwable) {
+      try { GLES20.glDeleteTextures(1, intArrayOf(id), 0) } catch(_: Throwable) {}
+      return 0
+    }
     glTextures[key] = id
-    while (glTextures.size > 128) {
-      val oldestKey = glTextures.keys.firstOrNull() ?: break
+    while (glTextures.size > 192) {
+      val oldestKey = glTextures.keys.firstOrNull { it !in TerrainComposition.textureIds().map(String::lowercase) } ?: break
       val oldest = glTextures.remove(oldestKey) ?: continue
       GLES20.glDeleteTextures(1, intArrayOf(oldest), 0)
     }
@@ -488,10 +512,15 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     GLES20.glUniform1f(uvRotationLoc, 0f)
     val terrainIds = TerrainComposition.detailTextures().take(4)
     val fallbackId = terrainIds.firstOrNull { it.isNotEmpty() } ?: terrainTextureUuid
+    terrainBitmapHits = 0
+    terrainBitmapMisses = 0
     val fallbackTexture = if (fallbackId.isNotEmpty()) textureFor(fallbackId) else 0
     val textureIds = IntArray(4) { i ->
       val uuid = terrainIds.getOrNull(i)?.takeIf { it.isNotEmpty() } ?: fallbackId
-      if (uuid.isNotEmpty()) textureFor(uuid).takeIf { it != 0 } ?: fallbackTexture else fallbackTexture
+      if (uuid.isNotEmpty()) {
+        if (ImageAssets.has(uuid)) terrainBitmapHits++ else terrainBitmapMisses++
+        textureFor(uuid).takeIf { it != 0 } ?: fallbackTexture
+      } else fallbackTexture
     }
     val hasTerrainTexture = textureIds.any { it != 0 }
     terrainGpuTextures = textureIds.count { it != 0 }
@@ -632,7 +661,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     val v = compile(GLES20.GL_VERTEX_SHADER, vs); val f = compile(GLES20.GL_FRAGMENT_SHADER, fs); val p = GLES20.glCreateProgram()
     GLES20.glAttachShader(p,v); GLES20.glAttachShader(p,f); GLES20.glLinkProgram(p); val ok = IntArray(1); GLES20.glGetProgramiv(p,GLES20.GL_LINK_STATUS,ok,0); if (ok[0] == 0) throw IllegalStateException(GLES20.glGetProgramInfoLog(p)); GLES20.glDeleteShader(v); GLES20.glDeleteShader(f); return p
   }
-  fun gfxLine(): String = "GFX-DIAG backend=GLES fps=$fps firstFrameMs=$firstFrameLatencyMs surfaceCreated=" + (if (glSurfaceCreated) "si" else "no") + " surfaceChanged=" + (if (glSurfaceChanged) "si" else "no") + " holderValid=" + (if (try { view?.holder?.surface?.isValid == true } catch (_: Throwable) { false }) "si" else "no") + " shown=" + (if (try { view?.isShown == true } catch (_: Throwable) { false }) "si" else "no") + " obj=$sceneObjects meshRef=$meshReferences meshReady=$meshObjects tex=" + texturedObjects + " terrainTex=" + (if (terrainTextureUuid.isNotEmpty()) terrainTextureUuid.take(8) else "-") + " terrainGpu=$terrainGpuTextures" + " cacheGPU=" + glTextures.size + " draws=$drawCount terrain=" + TerrainMesh.patchesGot() + "/256 water=" + (if (DRAW_WATER_SURFACE) "on" else "off") + " frameAgeMs=" + frameAgeMs() + " startOk=" + (if (startOk) "si" else "no") + " fase=$lastFase initErr=" + (initError ?: "-") + " eye=" + "%.1f,%.1f,%.1f".format(targetX + cos(orbitYaw)*orbitDistance, targetY + sin(orbitPitch)*orbitDistance, targetZ + sin(orbitYaw)*orbitDistance) + " target=" + "%.1f,%.1f,%.1f".format(targetX,targetY,targetZ) + " " + TerrainComposition.status() + " " + ImageAssets.status() + " " + MeshAssets.status() + " " + PrimShapes.status()
+  fun gfxLine(): String = "GFX-DIAG backend=GLES fps=$fps firstFrameMs=$firstFrameLatencyMs surfaceCreated=" + (if (glSurfaceCreated) "si" else "no") + " surfaceChanged=" + (if (glSurfaceChanged) "si" else "no") + " holderValid=" + (if (try { view?.holder?.surface?.isValid == true } catch (_: Throwable) { false }) "si" else "no") + " shown=" + (if (try { view?.isShown == true } catch (_: Throwable) { false }) "si" else "no") + " obj=$sceneObjects meshRef=$meshReferences meshReady=$meshObjects tex=" + texturedObjects + " terrainTex=" + (if (terrainTextureUuid.isNotEmpty()) terrainTextureUuid.take(8) else "-") + " terrainGpu=$terrainGpuTextures terrainBmp=$terrainBitmapHits/$terrainBitmapMisses" + " cacheGPU=" + glTextures.size + " draws=$drawCount terrain=" + TerrainMesh.patchesGot() + "/256 water=" + (if (DRAW_WATER_SURFACE) "on" else "off") + " frameAgeMs=" + frameAgeMs() + " startOk=" + (if (startOk) "si" else "no") + " fase=$lastFase initErr=" + (initError ?: "-") + " eye=" + "%.1f,%.1f,%.1f".format(targetX + cos(orbitYaw)*orbitDistance, targetY + sin(orbitPitch)*orbitDistance, targetZ + sin(orbitYaw)*orbitDistance) + " target=" + "%.1f,%.1f,%.1f".format(targetX,targetY,targetZ) + " " + TerrainComposition.status() + " " + ImageAssets.status() + " " + MeshAssets.status() + " " + PrimShapes.status()
   fun sunState(): String = "WORLD-SCENE backend=GLES mesh=procedural terrainPatches=" + TerrainMesh.patchesGot()
   fun projectLabel(fx: Double, fy: Double, fz: Double): Pair<Float,Float>? = null
   fun frameAgeMs(): Long = if (lastFrame > 0L) (SystemClock.elapsedRealtime() - lastFrame).coerceAtLeast(0L) else -1L

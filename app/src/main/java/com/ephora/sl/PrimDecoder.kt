@@ -4,7 +4,7 @@ import java.nio.ByteOrder
 import java.util.Locale
 object PrimDecoder {
   data class TextureFace(val uuid: String, val scaleS: Float, val scaleT: Float, val offsetS: Float, val offsetT: Float, val rotation: Float, val r: Float, val g: Float, val b: Float, val a: Float)
-  data class Prim(val id: Long, var tipo: Int, var x: Double, var y: Double, var z: Double, var sx: Float, var sy: Float, var sz: Float, var yaw: Float, var seen: Long, var mat: Int = -1, var tex: String = "", var texScaleS: Float = 1f, var texScaleT: Float = 1f, var texOffsetS: Float = 0f, var texOffsetT: Float = 0f, var texRotation: Float = 0f, var texR: Float = 1f, var texG: Float = 1f, var texB: Float = 1f, var texA: Float = 1f, var texFaces: List<TextureFace> = emptyList(), var pathCurve: Int = 0x10, var profileCurve: Int = 0x01, var meshId: String = "", var hasShape: Boolean = false, var shPb: Float = 0f, var shPe: Float = 1f, var shPsx: Float = 1f, var shPsy: Float = 1f, var shShx: Float = 0f, var shShy: Float = 0f, var shTw: Float = 0f, var shTwb: Float = 0f, var shRo: Float = 0f, var shTpx: Float = 0f, var shTpy: Float = 0f, var shRev: Float = 0f, var shSk: Float = 0f, var shQb: Float = 0f, var shQe: Float = 1f, var shQh: Float = 0f)
+  data class Prim(val id: Long, var tipo: Int, var x: Double, var y: Double, var z: Double, var sx: Float, var sy: Float, var sz: Float, var yaw: Float, var seen: Long, var mat: Int = -1, var tex: String = "", var texScaleS: Float = 1f, var texScaleT: Float = 1f, var texOffsetS: Float = 0f, var texOffsetT: Float = 0f, var texRotation: Float = 0f, var texR: Float = 1f, var texG: Float = 1f, var texB: Float = 1f, var texA: Float = 1f, var texFaces: List<TextureFace> = emptyList(), var pathCurve: Int = 0x10, var profileCurve: Int = 0x01, var meshId: String = "", var hasShape: Boolean = false, var shPb: Float = 0f, var shPe: Float = 1f, var shPsx: Float = 1f, var shPsy: Float = 1f, var shShx: Float = 0f, var shShy: Float = 0f, var shTw: Float = 0f, var shTwb: Float = 0f, var shRo: Float = 0f, var shTpx: Float = 0f, var shTpy: Float = 0f, var shRev: Float = 0f, var shSk: Float = 0f, var shQb: Float = 0f, var shQe: Float = 1f, var shQh: Float = 0f, var parentId: Long = 0L)
   var nTerse = 0L
   var nComp = 0L
   var nFull = 0L
@@ -360,7 +360,7 @@ object PrimDecoder {
         if (size <= 0 || o + size > raw.size) return null
         val base = raw.copyOfRange(o, o + size)
         o += size
-        val values = Array(45) { base }
+        val values = Array(32) { base }
         var guard = 0
         while (o < raw.size && guard++ < 64) {
           var flags = 0L
@@ -400,7 +400,7 @@ object PrimDecoder {
           (255 - (c[0].toInt() and 255)) / 255f, (255 - (c[1].toInt() and 255)) / 255f,
           (255 - (c[2].toInt() and 255)) / 255f, (255 - (c[3].toInt() and 255)) / 255f)
       }
-      return TextureEntryFields((0 until 45).map(::makeFace))
+      return TextureEntryFields((0 until 32).map(::makeFace))
     } catch (_: Throwable) { return null }
   }  private fun zeroExpand(data: ByteArray): ByteArray {
     try {
@@ -620,7 +620,7 @@ object PrimDecoder {
     pendingTextures.remove(id)?.let { applyTextureLocked(r, it) }
     pendingMeshes.remove(id)?.let { r.meshId = it }
   }
-  private fun put(id: Long, tipo: Int, x: Double, y: Double, z: Double, sx: Float, sy: Float, sz: Float, yw: Float, now: Long, mat: Int = -1, tex: String = "") {
+  private fun put(id: Long, tipo: Int, x: Double, y: Double, z: Double, sx: Float, sy: Float, sz: Float, yw: Float, now: Long, mat: Int = -1, tex: String = "", parentId: Long = -1L) {
     try {
       if (!x.isFinite() || !y.isFinite() || !z.isFinite()) {
         try { lastPutReject = "no-finito id=" + id } catch(_: Throwable) {}
@@ -644,7 +644,7 @@ object PrimDecoder {
         val r = recs[id]
         val target = if (r == null) {
           val yy = if (yw.isFinite()) yw else 0f
-          Prim(id, tipo, x, y, z, normS(sx), normS(sy), normS(sz), yy, now, mat, tex).also { recs[id] = it }
+          Prim(id, tipo, x, y, z, normS(sx), normS(sy), normS(sz), yy, now, mat, tex, parentId = parentId.coerceAtLeast(0L)).also { recs[id] = it }
         } else {
           if (tipo != -1) r.tipo = tipo
           if (mat != -1) r.mat = mat
@@ -654,6 +654,7 @@ object PrimDecoder {
           if (sy.isFinite()) r.sy = normS(sy)
           if (sz.isFinite()) r.sz = normS(sz)
           if (yw.isFinite()) r.yaw = yw
+          if (parentId >= 0L) r.parentId = parentId
           r.seen = now
           r
         }
@@ -744,6 +745,55 @@ object PrimDecoder {
       return line
     } catch (_: Throwable) { return "R3-TEST error" }
   }
+  private fun readCstr(p: ByteArray, o0: Int): Int? {
+    var o = o0
+    while (o < p.size) {
+      if (p[o].toInt() == 0) return o + 1
+      o++
+    }
+    return null
+  }
+  private fun parseShape23(p: ByteArray, o: Int): ShapeData? {
+    return try {
+      if (o < 0 || o + 23 > p.size) return null
+      val fPathCurve = p[o].toInt() and 255
+      val fProfileCurve = p[o + 1].toInt() and 255
+      val fPb = (u16at(p, o + 2) * 0.00002f).coerceIn(0f, 1f)
+      val fPe = (1f - u16at(p, o + 4) * 0.00002f).coerceIn(0f, 1f)
+      val fPsx = (200 - (p[o + 6].toInt() and 255)) * 0.01f
+      val fPsy = (200 - (p[o + 7].toInt() and 255)) * 0.01f
+      val fShx = p[o + 8].toInt().toByte().toInt() / 100f
+      val fShy = p[o + 9].toInt().toByte().toInt() / 100f
+      val fTw = p[o + 10].toInt().toByte().toInt() / 100f
+      val fTwb = p[o + 11].toInt().toByte().toInt() / 100f
+      val fRo = p[o + 12].toInt().toByte().toInt() / 100f
+      val fTpx = p[o + 13].toInt().toByte().toInt() / 100f
+      val fTpy = p[o + 14].toInt().toByte().toInt() / 100f
+      val fRev = 1f + (p[o + 15].toInt() and 255) * 0.015f
+      val fSk = p[o + 16].toInt().toByte().toInt() / 100f
+      val fQb = (u16at(p, o + 17) * 0.00002f).coerceIn(0f, 1f)
+      val fQe = (1f - u16at(p, o + 19) * 0.00002f).coerceIn(0f, 1f)
+      val fQh = (u16at(p, o + 21) * 0.00002f).coerceIn(0f, 1f)
+      // The 23-byte ConstructionData block ends after ProfileHollow.
+      if (o + 23 > p.size) return null
+      ShapeData(fPathCurve, fProfileCurve, fPb, fPe, fPsx, fPsy, fShx, fShy, fTw, fTwb, fRo, fTpx, fTpy, fRev, fSk, fQb, fQe, fQh)
+    } catch (_: Throwable) { null }
+  }
+  private fun decodeTextureAndMesh(id: Long, texRaw: ByteArray, extraRaw: ByteArray) {
+    try {
+      val te = parseTextureEntry(texRaw)
+      if (te != null) synchronized(recs) { recs[id]?.let { applyTextureLocked(it, te) } }
+    } catch (_: Throwable) {}
+    try {
+      val meshId = meshIdFromExtraParams(extraRaw)
+      if (meshId != null) {
+        meshIds++
+        meshParamLast = meshId
+        MeshAssets.request(meshId)
+        synchronized(recs) { recs[id]?.let { it.meshId = meshId } ?: run { pendingMeshes[id] = meshId } }
+      }
+    } catch (_: Throwable) {}
+  }
   // REGLA terse: solo posicion/yaw, jamas escala (R1 no trae escala; nuevo sin full = 1m via normS)
   private fun parseTerse(p: ByteArray, now: Long): Int {
     try {
@@ -787,8 +837,10 @@ object PrimDecoder {
         if (len == 64 || len == 32 || len == 80 || len == 48) {
           val qav = (len == 80 || len == 48)
           val qb = 6 + (if (qav) 16 else 0)
-          val zlo = if (TerrainMesh.nPatches > 0 && TerrainMesh.minH.isFinite() && TerrainMesh.maxH.isFinite()) TerrainMesh.minH - 20f else -100f
-          val zhi = if (TerrainMesh.nPatches > 0 && TerrainMesh.minH.isFinite() && TerrainMesh.maxH.isFinite()) TerrainMesh.maxH + 20f else 500f
+          // ImprovedTerse uses U16 position: X/Y [-128,384], Z [-256,768].
+          // Do not derive Z from terrain min/max; terrain can arrive after the object stream.
+          val zlo = -256f
+          val zhi = 768f
           val x = u16f(u16at(blk, qb), -128f, 384f).toDouble()
           val y = u16f(u16at(blk, qb + 2), -128f, 384f).toDouble()
           val z = u16f(u16at(blk, qb + 4), zlo, zhi).toDouble()
@@ -844,102 +896,113 @@ object PrimDecoder {
       return got
     } catch(_: Throwable) { return 0 }
   }
-  private fun parseCompExtra(blk: ByteArray): ByteArray? {
-    try {
-      if (blk.size < 84) return null
-      var o = 64
-      val flags = ByteBuffer.wrap(blk, o, 4).order(ByteOrder.LITTLE_ENDIAN).int
-      o += 4 + 16 // CompressedFlags + OwnerID
-      if ((flags and 0x80) != 0) { if (o + 12 > blk.size) return null; o += 12 }
-      if ((flags and 0x20) != 0) { if (o + 4 > blk.size) return null; o += 4 }
-      if ((flags and 0x02) != 0) { if (o + 1 > blk.size) return null; o += 1 }
-      else if ((flags and 0x01) != 0) {
-        if (o + 1 > blk.size) return null
-        val n = blk[o].toInt() and 255; o += 1
-        if (o + n > blk.size) return null
-        o += n
-      }
-      if ((flags and 0x04) != 0) {
-        while (o < blk.size && blk[o].toInt() != 0) o++
-        if (o >= blk.size) return null
-        o++
-        if (o + 4 > blk.size) return null
-        o += 4
-      }
-      if ((flags and 0x200) != 0) {
-        while (o < blk.size && blk[o].toInt() != 0) o++
-        if (o >= blk.size) return null
-        o++
-      }
-      if ((flags and 0x08) != 0) {
-        // ParticleSystem is variable in the template. It is prefixed with a one-byte length.
-        if (o + 1 > blk.size) return null
-        val n = blk[o].toInt() and 255; o += 1
-        if (o + n > blk.size) return null
-        o += n
-      }
-      if (o >= blk.size) return null
-      val n = blk[o].toInt() and 255
-      if (o + 1 + n > blk.size) return null
-      return blk.copyOfRange(o + 1, o + 1 + n)
-    } catch (_: Throwable) { return null }
-  }
   private fun parseComp(p: ByteArray, now: Long): Int {
     try {
       if (p.size < 11) return 0
       var o = 10
-      val count = p[o].toInt() and 0xFF
-      o += 1
+      val count = p[o].toInt() and 255
+      o++
       if (count <= 0) return 0
       var got = 0
       var guard = count.coerceAtMost(255)
       while (guard-- > 0) {
         if (o + 6 > p.size) break
+        // ObjectUpdateCompressed: each block has a 4-byte local-id in the UDP
+        // block envelope followed by a 16-bit length, then the opaque Data blob.
         o += 4
-        val dlen = u16at(p, o); o += 2
+        val dlen = u16at(p, o)
+        o += 2
         if (dlen <= 0 || o + dlen > p.size) break
         val blk = p.copyOfRange(o, o + dlen)
-        if (dlen == 44 || dlen == 60) {
+        try {
+          if (dlen < 85) { nLenMalo++; o += dlen; continue }
+          val fullIdHex = hexPrev(blk, 16)
+          val id = ((blk[16].toInt() and 255L) or
+            ((blk[17].toInt() and 255L) shl 8) or
+            ((blk[18].toInt() and 255L) shl 16) or
+            ((blk[19].toInt() and 255L) shl 24))
+          val pcode = blk[20].toInt() and 255
+          val state = blk[21].toInt() and 255
+          val mat = blk[26].toInt() and 255
+          val click = blk[27].toInt() and 255
           val bb = ByteBuffer.wrap(blk).order(ByteOrder.LITTLE_ENDIAN)
-          val id = bb.int.toLong() and 0xFFFFFFFFL
-          val av = blk[5].toInt() and 0xFF
-          if (av == 1 && dlen == 60) {
-            put(id, 47, bb.getFloat(22).toDouble(), bb.getFloat(26).toDouble(), bb.getFloat(30).toDouble(), Float.NaN, Float.NaN, Float.NaN, Float.NaN, now)
-          } else {
-            put(id, -1, bb.getFloat(6).toDouble(), bb.getFloat(10).toDouble(), bb.getFloat(14).toDouble(), Float.NaN, Float.NaN, Float.NaN, Float.NaN, now)
+          val sx = bb.getFloat(28)
+          val sy = bb.getFloat(32)
+          val sz = bb.getFloat(36)
+          val x = bb.getFloat(40).toDouble()
+          val y = bb.getFloat(44).toDouble()
+          val z = bb.getFloat(48).toDouble()
+          val yaw = yawVec(bb.getFloat(52), bb.getFloat(56), bb.getFloat(60))
+          val flags = bb.getInt(64)
+          var i = 68
+          // OwnerID is always present.
+          i += 16
+          // Optional fields in the exact CompressedFlags order used by OpenMetaverse.
+          if ((flags and 0x80) != 0) i += 12 // angular velocity
+          var parentId = 0L
+          if ((flags and 0x20) != 0) {
+            if (i + 4 > blk.size) throw IndexOutOfBoundsException("parent")
+            parentId = ((blk[i].toInt() and 255L) or
+              ((blk[i + 1].toInt() and 255L) shl 8) or
+              ((blk[i + 2].toInt() and 255L) shl 16) or
+              ((blk[i + 3].toInt() and 255L) shl 24))
+            i += 4
           }
-          censoAdd(censoComp, id)
-          got++
-        } else if (dlen >= 84) {
-          val bb = ByteBuffer.wrap(blk).order(ByteOrder.LITTLE_ENDIAN)
-          val id = bb.getInt(16).toLong() and 0xFFFFFFFFL
-          val pcode = blk[20].toInt() and 0xFF
-          val sx = bb.getFloat(28); val sy = bb.getFloat(32); val sz = bb.getFloat(36)
-          val x = bb.getFloat(40).toDouble(); val y = bb.getFloat(44).toDouble(); val z = bb.getFloat(48).toDouble()
-          val yw = yawVec(bb.getFloat(52), bb.getFloat(56), bb.getFloat(60))
-          put(id, pcode, x, y, z, sx, sy, sz, yw, now, blk[26].toInt() and 0xFF)
-          censoAdd(censoComp, id)
-          try {
-            parseCompExtra(blk)?.let { extra ->
-              val meshId = meshIdFromExtraParams(extra)
-              if (meshId != null) {
-                meshIds++; meshParamLast = meshId; MeshAssets.request(meshId)
-                synchronized(recs) {
-                  val r = recs[id]
-                  if (r != null) r.meshId = meshId else pendingMeshes[id] = meshId
-                }
-              }
+          if ((flags and 0x02) != 0) {
+            i += 1 // Tree species
+          } else if ((flags and 0x01) != 0) {
+            if (i + 1 > blk.size) throw IndexOutOfBoundsException("scratch")
+            val n = blk[i].toInt() and 255
+            i += 1 + n
+          }
+          if ((flags and 0x04) != 0) {
+            i = readCstr(blk, i) ?: throw IndexOutOfBoundsException("text")
+            if (i + 4 > blk.size) throw IndexOutOfBoundsException("textColor")
+            i += 4
+          }
+          if ((flags and 0x200) != 0) {
+            i = readCstr(blk, i) ?: throw IndexOutOfBoundsException("media")
+          }
+          if ((flags and 0x08) != 0) i += 86 // ParticleSystem fixed payload in the legacy compressed wire format
+          if (i >= blk.size) throw IndexOutOfBoundsException("extra-len")
+          val extraLen = blk[i].toInt() and 255
+          i += 1
+          if (i + extraLen > blk.size) throw IndexOutOfBoundsException("extra")
+          val extra = blk.copyOfRange(i, i + extraLen)
+          i += extraLen
+          if ((flags and 0x10) != 0) i += 41 // sound UUID + gain + flags + radius
+          if ((flags and 0x100) != 0) i = readCstr(blk, i) ?: throw IndexOutOfBoundsException("namevalues")
+          if (i + 23 > blk.size) throw IndexOutOfBoundsException("shape23")
+          val shape = parseShape23(blk, i) ?: throw IndexOutOfBoundsException("shape")
+          i += 23
+          var texRaw = ByteArray(0)
+          if (i + 4 <= blk.size) {
+            val texLen = ((blk[i].toInt() and 255) or
+              ((blk[i + 1].toInt() and 255) shl 8) or
+              ((blk[i + 2].toInt() and 255) shl 16) or
+              ((blk[i + 3].toInt() and 255) shl 24))
+            i += 4
+            if (texLen >= 0 && i + texLen <= blk.size) {
+              texRaw = blk.copyOfRange(i, i + texLen)
+              i += texLen
+            } else {
+              throw IndexOutOfBoundsException("textureEntry")
             }
-          } catch(_: Throwable) {}
-          try { synchronized(recs) { if (reqMultDone.contains(id)) { nAnsweredReq++; answeredIds.add(id) } } } catch(_: Throwable) {}
+          }
+          put(id, pcode, x, y, z, sx, sy, sz, yaw, now, mat, parentId = parentId)
+          synchronized(recs) { recs[id]?.let { applyShapeLocked(it, shape) } }
+          decodeTextureAndMesh(id, texRaw, extra)
+          censoAdd(censoComp, id)
+          if (reqMultDone.contains(id)) { nAnsweredReq++; answeredIds.add(id) }
           got++
-        } else {
+          if (diagLatch.length < 1) diagLatch = "COMP-FIRST id=$id pcode=$pcode state=$state click=$click flags=0x${flags.toUInt().toString(16)} extra=${extra.size} tex=${texRaw.size} parent=$parentId"
+        } catch (_: Throwable) {
           nLenMalo++
         }
         o += dlen
       }
       return got
-    } catch(_: Throwable) { return 0 }
+    } catch (_: Throwable) { return 0 }
   }
   private fun parseFull(p: ByteArray, now: Long): Int {
     try {
@@ -949,8 +1012,8 @@ object PrimDecoder {
       o += 1
       if (count <= 0) return 0
       var got = 0
-      var guard = count.coerceAtMost(64)
-      try { if (count > 64) nFullCap += (count - 64).toLong() } catch (_: Throwable) {}
+      var guard = count.coerceAtMost(255)
+      try { if (count > 255) nFullCap += (count - 255).toLong() } catch (_: Throwable) {}
       while (guard > 0) {
         guard -= 1
         var muId = -1L
@@ -991,28 +1054,16 @@ object PrimDecoder {
           try { synchronized(recs) { if (reqMultDone.contains(id)) { nAnsweredReq++; answeredIds.add(id) } } } catch(_: Throwable) {}
         }
         o += ilen
-        // CITA-DECODE formas (manda el codigo, no el comentario de la plantilla): LibreMetaverse Primitive.cs UnpackBeginCut/UnpackEndCut/UnpackPathScale/UnpackPathShear/UnpackPathTwist/UnpackPathTaper/UnpackPathRevolutions/UnpackProfileHollow (copia scratch/upstream/LM-Primitive.cs:1537-1631) + OpenSim PrimitiveBaseShape.cs ToPrim (PathEnd=1-raw*2e-5, ProfileEnd=1-raw*2e-5, Scale=(200-raw)*0.01, Shear S8 con signo, Rev=1+raw*0.015; copia scratch/upstream/PrimitiveBaseShape.cs:1427-1445). Los comentarios quanta=0.01 de message_template.msg estan obsoletos: el End va INVERTIDO (raw 0 = sin corte = 1.0).
-        if (o + 31 > p.size) { try { stashFullMu("in30", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
-        val fPathCurve = p[o + 8].toInt() and 255
-        val fProfileCurve = p[o + 9].toInt() and 255
-        val fPb = (u16at(p, o + 10) * 0.00002f).coerceIn(0f, 1f)
-        val fPe = (1f - u16at(p, o + 12) * 0.00002f).coerceIn(0f, 1f)
-        val fPsx = (200 - (p[o + 14].toInt() and 255)) * 0.01f
-        val fPsy = (200 - (p[o + 15].toInt() and 255)) * 0.01f
-        val fShx = p[o + 16].toInt() / 100f
-        val fShy = p[o + 17].toInt() / 100f
-        val fTw = p[o + 18].toInt() / 100f
-        val fTwb = p[o + 19].toInt() / 100f
-        val fRo = p[o + 20].toInt() / 100f
-        val fTpx = p[o + 21].toInt() / 100f
-        val fTpy = p[o + 22].toInt() / 100f
-        val fRev = 1f + (p[o + 23].toInt() and 255) * 0.015f
-        val fSk = p[o + 24].toInt() / 100f
-        val fQb = (u16at(p, o + 25) * 0.00002f).coerceIn(0f, 1f)
-        val fQe = (1f - u16at(p, o + 27) * 0.00002f).coerceIn(0f, 1f)
-        val fQh = (u16at(p, o + 29) * 0.00002f).coerceIn(0f, 1f)
-        o += 31
-        val sh = ShapeData(fPathCurve, fProfileCurve, fPb, fPe, fPsx, fPsy, fShx, fShy, fTw, fTwb, fRo, fTpx, fTpy, fRev, fSk, fQb, fQe, fQh)
+        // ObjectUpdate: ParentID + UpdateFlags precede the 23-byte ConstructionData.
+        if (o + 8 > p.size) { try { stashFullMu("parent-flags", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
+        val parentId = ((p[o].toInt() and 255L) or ((p[o + 1].toInt() and 255L) shl 8) or ((p[o + 2].toInt() and 255L) shl 16) or ((p[o + 3].toInt() and 255L) shl 24))
+        val updateFlags = ((p[o + 4].toInt() and 255L) or ((p[o + 5].toInt() and 255L) shl 8) or ((p[o + 6].toInt() and 255L) shl 16) or ((p[o + 7].toInt() and 255L) shl 24))
+        o += 8
+        synchronized(recs) { recs[id]?.parentId = parentId }
+        try { if (fullQ.size < 2) fullQ.add("FULL-PARENT id=$id parent=$parentId flags=0x${updateFlags.toUInt().toString(16)}") } catch(_: Throwable) {}
+        if (o + 23 > p.size) { try { stashFullMu("shape23", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
+        val sh = parseShape23(p, o) ?: break
+        o += 23
         try { synchronized(recs) { recs[id]?.let { applyShapeLocked(it, sh) } ?: run { pendingShapes[id] = sh } } } catch(_: Throwable) {}
         var sgv = skipGet(p, o, true)
         if (sgv.first < 0) { try { stashSkA(muId, muIlen, muPc, muIn, o, p.size, p) } catch(_: Throwable) {}; break }
@@ -1365,7 +1416,11 @@ object PrimDecoder {
           !viewerRelative
         }.toList()
         try { recsLast = all.size } catch (_: Throwable) {}
-        val sorted = all.sortedBy { r -> (r.x - ax) * (r.x - ax) + (r.y - ay) * (r.y - ay) + (r.z - az) * (r.z - az) }
+        val ready = all.filter { r -> r.tipo == 47 || r.hasShape || r.meshId.isNotEmpty() }
+          .sortedBy { r -> (r.x - ax) * (r.x - ax) + (r.y - ay) * (r.y - ay) + (r.z - az) * (r.z - az) }
+        val pending = all.filter { r -> r.tipo != 47 && !r.hasShape && r.meshId.isEmpty() }
+          .sortedBy { r -> (r.x - ax) * (r.x - ax) + (r.y - ay) * (r.y - ay) + (r.z - az) * (r.z - az) }
+        val sorted = ready + pending
         if (recs.size > 4000) {
           var i = 0
           for (r in sorted) {
@@ -1377,7 +1432,7 @@ object PrimDecoder {
             }
           }
         }
-        val pub = sorted.take(1024).map { r -> r.copy() }
+        val pub = sorted.take(1800).map { r -> r.copy() }
         try { pubLast = pub.size } catch (_: Throwable) {}
         try { pubAx = ax } catch(_: Throwable) {}
         try { pubAy = ay } catch(_: Throwable) {}
