@@ -306,25 +306,26 @@ object AgentLoop {
     } catch (_: Throwable) { false }
   }
   /** Re-request specific missing ImagePacket blocks instead of restarting the whole image. */
+  /** Lumiya-compatible recovery: restart stalled texture transfers from Packet=0. */
   fun retryMissingImagePackets(src: String = "missing"): Int {
     return try {
       val s = LoginManager.Session
       val sk = loopSock ?: return 0
       val ad = loopAddr ?: return 0
       if (s.agentId.isBlank() || s.sessionId.isBlank() || s.simPort == 0) return 0
-      val missing = ImageAssets.missingRequests(2)
+      val stalled = ImageAssets.missingRequests(2)
       var sent = 0
-      for ((u, packet) in missing) {
+      for ((u, _) in stalled) {
         try {
-          val b = UdpCircuit.requestImagePacket(s.agentId, s.sessionId, u, packet)
+          val b = UdpCircuit.requestImagePacket(s.agentId, s.sessionId, u, 0)
           sk.send(DatagramPacket(b, b.size, ad, s.simPort))
           tx++
           sent++
-          onTick?.invoke("IMAGE-REQ-MISSING id8=" + u.take(8) + " packet=" + packet + " src=" + src)
+          onTick?.invoke("IMAGE-UDP-RESTART id8=" + u.take(8) + " packet=0 src=" + src)
         } catch (_: Throwable) {}
       }
       sent
-    } catch (_: Throwable) { 0 }
+    } catch(_: Throwable) { 0 }
   }
 
   fun sendImageReq(): Boolean {

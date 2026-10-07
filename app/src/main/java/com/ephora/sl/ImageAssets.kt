@@ -35,6 +35,7 @@ object ImageAssets {
     var receivedBytes: Int = 0,
     var lastReceivedMs: Long = 0L,
     var lastRetryMs: Long = 0L
+    var retries: Int = 0
   ) {
     fun addPart(packet: Int, bytes: ByteArray) {
       if (packet < 0 || bytes.isEmpty()) return
@@ -109,6 +110,11 @@ object ImageAssets {
         val packets = u16(payload, 21)
         val length = u16(payload, 23)
         if (size <= 0 || size > MAX_COMPRESSED || length <= 0 || 25 + length > payload.size) return null
+        // A new ImageData starts a fresh Lumiya-style transfer from packet 0.
+        // Discard fragments belonging to an earlier timed-out attempt so stale
+        // packets can never complete or corrupt the new stream.
+        transfer.parts.clear()
+        transfer.receivedBytes = 0
         transfer.expected = size
         transfer.codec = imageCodec
         transfer.packetCount = packets
@@ -235,6 +241,10 @@ object ImageAssets {
   @Synchronized fun pendingCount(): Int = pending.size
   @Synchronized fun hasPending(uuid: String): Boolean = pending.containsKey(uuid.lowercase())
 
+  /**
+   * Lumiya-compatible UDP recovery: restart the entire transfer from Packet=0.
+   * Individual ImagePacket retransmission is intentionally avoided here.
+   */
   @Synchronized fun missingRequests(limit: Int = 2): List<Pair<String, Int>> {
     val now = System.currentTimeMillis()
     val result = ArrayList<Pair<String, Int>>(limit)
@@ -243,13 +253,10 @@ object ImageAssets {
       if (transfer.expected <= 0) continue
       if (now - transfer.lastReceivedMs < UDP_STALL_MS) continue
       if (now - transfer.lastRetryMs < UDP_RETRY_MS) continue
-
-      var missing = 1
-      while (missing <= transfer.packetCount && transfer.parts.containsKey(missing)) missing++
-      if (missing > transfer.packetCount) missing = transfer.packetCount + 1
-
+      if (transfer.retries >= 2) continue
+      transfer.retries++
       transfer.lastRetryMs = now
-      result.add(uuid to missing)
+      result.add(uuid to 0)
     }
     return result
   }
