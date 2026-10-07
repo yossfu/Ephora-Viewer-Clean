@@ -552,6 +552,16 @@ object AgentLoop {
           if (d != null) TerrainComposition.accept(d.payload)?.let { onTick?.invoke(it) }
         } catch(_: Throwable) {}
       }
+      if (mid == 158) {
+        try {
+          val d = UdpCircuit.decode(buf, len)
+          if (d != null) {
+            AvatarAppearanceState.accept(d.payload)?.let { line ->
+              try { onTick?.invoke(line) } catch(_: Throwable) {}
+            }
+          }
+        } catch(_: Throwable) {}
+      }
       if (mid == 11) {
         try {
           val d = UdpCircuit.decode(buf, len)
