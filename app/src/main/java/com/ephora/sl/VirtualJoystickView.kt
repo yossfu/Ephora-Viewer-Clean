@@ -6,18 +6,22 @@ import android.graphics.Paint
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
-import kotlin.math.hypot
 
 class VirtualJoystickView @JvmOverloads constructor(
   context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
 ) : View(context, attrs, defStyleAttr) {
-  var onMove: ((x: Float, y: Float) -> Unit)? = null
-  var onRelease: (() -> Unit)? = null
+  @Volatile private var knobX = 0f
+  @Volatile private var knobY = 0f
+  @Volatile private var active = false
   private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 4f }
   private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-  private var knobX = 0f
-  private var knobY = 0f
-  private var active = false
+
+  fun setState(x: Float, y: Float, pressed: Boolean) {
+    knobX = x.coerceIn(-1f, 1f)
+    knobY = y.coerceIn(-1f, 1f)
+    active = pressed
+    postInvalidateOnAnimation()
+  }
 
   override fun onDraw(canvas: Canvas) {
     super.onDraw(canvas)
@@ -36,43 +40,6 @@ class VirtualJoystickView @JvmOverloads constructor(
   }
 
   override fun onTouchEvent(event: MotionEvent): Boolean {
-    val cx = width * 0.5f
-    val cy = height * 0.5f
-    when (event.actionMasked) {
-      MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
-        active = true
-        val radius = minOf(width, height) * 0.36f
-        val dx = event.x - cx
-        val dy = event.y - cy
-        val len = hypot(dx.toDouble(), dy.toDouble()).toFloat()
-        val max = (radius * 0.62f).coerceAtLeast(1f)
-        if (len > max) {
-          knobX = dx / len
-          knobY = dy / len
-        } else {
-          knobX = dx / max
-          knobY = dy / max
-        }
-        onMove?.invoke(knobX.coerceIn(-1f, 1f), knobY.coerceIn(-1f, 1f))
-        invalidate()
-        return true
-      }
-      MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-        active = false
-        knobX = 0f
-        knobY = 0f
-        onMove?.invoke(0f, 0f)
-        onRelease?.invoke()
-        invalidate()
-        performClick()
-        return true
-      }
-    }
-    return true
-  }
-
-  override fun performClick(): Boolean {
-    super.performClick()
-    return true
+    return false
   }
 }
