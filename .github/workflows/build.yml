@@ -35,24 +35,6 @@ jobs:
         with:
           gradle-version: '8.10.2'
 
-      - name: Fetch Second Life system avatar resources
-        shell: bash
-        run: |
-          set -euo pipefail
-          BASE="https://raw.githubusercontent.com/Kaleaon/Linkpoint/7a5438152bd83e46eef6f2a0b69447118db7e40b/disassembled-apps/second-life-2025.12.1075/extracted-resources/assets/Avatar"
-          mkdir -p app/src/main/assets/avatar
-          for f in avatar_head.llm avatar_upper_body.llm avatar_lower_body.llm avatar_eye.llm avatar_eyelashes.llm avatar_skeleton.xml; do
-            curl --fail --location --retry 3 --silent --show-error "$BASE/$f" -o "app/src/main/assets/avatar/$f"
-          done
-          cat > app/src/main/assets/avatar/THIRD_PARTY_NOTICE.txt <<'EOF'
-Ephora uses the legacy Linden Binary Mesh (.llm) system-avatar resources
-obtained from the open-source Linkpoint project for local viewer functionality.
-Linkpoint source is distributed under the MIT License. These resources are
-used solely as viewer data for rendering the Second Life system avatar.
-Second Life and Linden Lab are trademarks of Linden Research, Inc.
-EOF
-          ls -lh app/src/main/assets/avatar
-
       - name: Build debug APK
         run: gradle :app:assembleDebug --no-daemon --console=plain --stacktrace
 
