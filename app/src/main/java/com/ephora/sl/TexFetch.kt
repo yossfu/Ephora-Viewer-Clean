@@ -164,6 +164,63 @@ object TexFetch {
     } catch(e: Throwable) { return "cert-FAIL " + e::class.java.simpleName }
     finally { try { sock?.close() } catch(_: Throwable) {} }
   }
+  private val inFlight = HashSet<String>()
+  @Volatile private var httpOk = 0L
+  @Volatile private var httpFail = 0L
+
+  /** Fetch visible object textures through the GetTexture capability. UDP remains available as fallback. */
+  fun requestVisible(ids: List<String>, max: Int = 4): Int {
+    val base = try { CapsManager.caps["GetTexture"] ?: "" } catch(_: Throwable) { "" }
+    if (base.isBlank() || max <= 0) return 0
+    var started = 0
+    for (raw in ids.distinct()) {
+      if (started >= max) break
+      val uuid = raw.lowercase()
+      try { java.util.UUID.fromString(uuid) } catch(_: Throwable) { continue }
+      if (ImageAssets.has(uuid)) continue
+      var take = false
+      synchronized(inFlight) {
+        if (!inFlight.contains(uuid)) { inFlight.add(uuid); take = true }
+      }
+      if (!take) continue
+      started++
+      CoroutineScope(Dispatchers.IO).launch {
+        try {
+          val url = base.trimEnd('/') + "/?texture_id=" + uuid
+          val client = okhttp3.OkHttpClient.Builder()
+            .connectTimeout(12, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(45, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(12, java.util.concurrent.TimeUnit.SECONDS)
+            .followRedirects(true).followSslRedirects(true).build()
+          val req = okhttp3.Request.Builder().url(url).get()
+            .header("Accept", "image/x-j2c")
+            .header("Accept-Encoding", "identity")
+            .header("User-Agent", "EPHORASL/7.70 (Android)")
+            .header("Connection", "close").build()
+          client.newCall(req).execute().use { resp ->
+            val bytes = try { resp.body?.bytes() ?: ByteArray(0) } catch(_: Throwable) { ByteArray(0) }
+            if (resp.isSuccessful && bytes.isNotEmpty() && bytes.size <= 16 * 1024 * 1024) {
+              if (ImageAssets.acceptHttpJ2c(uuid, bytes)) {
+                httpOk++
+                try { AgentLoop.onTick?.invoke("TEX-HTTP-OK id8=" + uuid.take(8) + " bytes=" + bytes.size + " code=" + resp.code) } catch(_: Throwable) {}
+              }
+            } else {
+              httpFail++
+              try { AgentLoop.onTick?.invoke("TEX-HTTP-FAIL id8=" + uuid.take(8) + " code=" + resp.code + " bytes=" + bytes.size + " ct=" + (resp.header("Content-Type") ?: "-")) } catch(_: Throwable) {}
+            }
+          }
+        } catch(e: Throwable) {
+          httpFail++
+          try { AgentLoop.onTick?.invoke("TEX-HTTP-FAIL id8=" + uuid.take(8) + " cause=" + e::class.java.simpleName + ":" + (e.message ?: "").take(120)) } catch(_: Throwable) {}
+        } finally {
+          synchronized(inFlight) { inFlight.remove(uuid) }
+        }
+      }
+    }
+    return started
+  }
+
+  fun httpStatus(): String = synchronized(inFlight) { "TEX-HTTP ok=" + httpOk + " fail=" + httpFail + " inflight=" + inFlight.size }
   fun kick(onLine: (String) -> Unit) {
     try {
       if (done || flying) return
