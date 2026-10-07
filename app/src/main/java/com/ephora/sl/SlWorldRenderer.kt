@@ -392,7 +392,10 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
           val face0 = o.texFaces.firstOrNull()
           val tex0 = face0?.uuid?.takeUnless { it == NULL_TEXTURE_UUID } ?: o.tex
           val tint0 = if (face0 != null) floatArrayOf(face0.r, face0.g, face0.b, face0.a) else color
-          drawMesh(shaped.buf, shaped.count, x, y, z, sx, sy, sz, o.yaw, tint0, tex0,\n            face0?.scaleS ?: o.texScaleS, face0?.scaleT ?: o.texScaleT,\n            face0?.offsetS ?: o.texOffsetS, face0?.offsetT ?: o.texOffsetT,\n            face0?.rotation ?: o.texRotation)
+          drawMesh(shaped.buf, shaped.count, x, y, z, sx, sy, sz, o.yaw, tint0, tex0,
+            face0?.scaleS ?: o.texScaleS, face0?.scaleT ?: o.texScaleT,
+            face0?.offsetS ?: o.texOffsetS, face0?.offsetT ?: o.texOffsetT,
+            face0?.rotation ?: o.texRotation)
         } else if (isAvatar) {
           drawMesh(mesh, vertexCount, x, y, z, sx, sy, sz, o.yaw, color)
         } else {
