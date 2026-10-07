@@ -392,7 +392,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
           val face0 = o.texFaces.firstOrNull()
           val tex0 = face0?.uuid?.takeUnless { it == NULL_TEXTURE_UUID } ?: o.tex
           val tint0 = if (face0 != null) floatArrayOf(face0.r, face0.g, face0.b, face0.a) else color
-          drawMesh(shaped.buf, shaped.count, x, y, z, sx, sy, sz, o.yaw, tint0, tex0, 1f, 1f, 0f, 0f, 0f)
+          drawMesh(shaped.buf, shaped.count, x, y, z, sx, sy, sz, o.yaw, tint0, tex0,\n            face0?.scaleS ?: o.texScaleS, face0?.scaleT ?: o.texScaleT,\n            face0?.offsetS ?: o.texOffsetS, face0?.offsetT ?: o.texOffsetT,\n            face0?.rotation ?: o.texRotation)
         } else if (isAvatar) {
           drawMesh(mesh, vertexCount, x, y, z, sx, sy, sz, o.yaw, color)
         } else {
@@ -441,6 +441,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     GLES20.glUniform4f(uvTransformLoc, scaleS, scaleT, offsetS, offsetT)
     GLES20.glUniform1f(uvRotationLoc, rotation)
     val texId = if (textureUuid.isNotEmpty()) textureFor(textureUuid) else 0
+    if (texId != 0) texturedObjects++
     GLES20.glUniform1i(useTextureLoc, if (texId != 0) 1 else 0)
     GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
     GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texId)
