@@ -499,13 +499,21 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     Matrix.scaleM(model, 0, sx, sz, sy)
     Matrix.multiplyMM(mvp, 0, vp, 0, model, 0)
     GLES20.glUniformMatrix4fv(mvpLoc, 1, false, mvp, 0)
-    GLES20.glUniform4fv(colorLoc, 1, color, 0)
+    val texId = if (textureUuid.isNotEmpty()) textureFor(textureUuid) else 0
+    // A missing streaming texture must not turn a valid object into black.
+    // Keep the real TextureEntry tint whenever the texture actually uploaded;
+    // otherwise use white so the geometry remains visible until the asset arrives.
+    val effectiveColor = if (textureUuid.isNotEmpty() && texId == 0) {
+      floatArrayOf(1f, 1f, 1f, 1f)
+    } else {
+      color
+    }
+    GLES20.glUniform4fv(colorLoc, 1, effectiveColor, 0)
     GLES20.glUniform1i(terrainModeLoc, 0)
     GLES20.glUniform4f(uvTransformLoc, scaleS, scaleT, offsetS, offsetT)
     GLES20.glUniform1f(uvRotationLoc, rotation)
     GLES20.glUniform1i(texGenLoc, texGen)
     GLES20.glUniform3f(objectScaleLoc, sx, sy, sz)
-    val texId = if (textureUuid.isNotEmpty()) textureFor(textureUuid) else 0
     if (texId != 0) texturedObjects++
     GLES20.glUniform1i(useTextureLoc, if (texId != 0) 1 else 0)
     GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
@@ -524,7 +532,9 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private fun textureFor(uuid: String): Int {
     val key = uuid.lowercase()
     glTextures[key]?.let { return it }
-    val bitmap = ImageAssets.bitmap(key) ?: return 0
+    // Take a stable CPU-side copy before uploading. ImageAssets may evict/recycle
+    // its LRU bitmap on another thread while the GL thread is uploading.
+    val bitmap = ImageAssets.bitmapCopy(key) ?: return 0
     val names = IntArray(1)
     GLES20.glGenTextures(1, names, 0)
     val id = names[0]
@@ -534,6 +544,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       // Clear a stale GL error first; otherwise an unrelated previous draw call
       // can make a perfectly valid texture upload look like a failure.
       while (GLES20.glGetError() != GLES20.GL_NO_ERROR) { }
+      GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 1)
       GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
       GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
       val pot = fun(v: Int): Boolean = v > 0 && (v and (v - 1)) == 0
@@ -552,12 +563,15 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       val err = GLES20.glGetError()
       if (err != GLES20.GL_NO_ERROR) {
         GLES20.glDeleteTextures(1, intArrayOf(id), 0)
+        try { bitmap.recycle() } catch(_: Throwable) {}
         return 0
       }
     } catch (_: Throwable) {
       try { GLES20.glDeleteTextures(1, intArrayOf(id), 0) } catch(_: Throwable) {}
+      try { bitmap.recycle() } catch(_: Throwable) {}
       return 0
     }
+    try { bitmap.recycle() } catch(_: Throwable) {}
     glTextures[key] = id
     while (glTextures.size > 192) {
       val oldestKey = glTextures.keys.firstOrNull { it !in TerrainComposition.textureIds().map(String::lowercase) } ?: break
@@ -834,8 +848,14 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
         return vec2(u,v);
       }
       void main(){
-        vec3 n=normalize(vNormal);
-        float l=0.38+0.62*max(dot(n,normalize(vec3(-0.35,0.88,0.28))),0.0);
+        // Mesh/prim normals are not guaranteed to be populated on every
+        // incoming LOD. normalize(vec3(0)) produces undefined/NaN lighting on
+        // GLES; clamp invalid/degenerate normals to a valid world-up normal.
+        float nl=length(vNormal);
+        vec3 n=(nl>0.001 && nl<100.0)?(vNormal/nl):vec3(0.0,1.0,0.0);
+        vec3 sun=normalize(vec3(-0.35,0.88,0.28));
+        float nd=max(dot(n,sun),0.0);
+        float l=0.55+0.45*nd;
         vec4 base;
         if(uTerrainMode==1){
           float x=clamp((vTerrainPos.x+128.0)/256.0,0.0,1.0);
