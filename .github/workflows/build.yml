@@ -40,5 +40,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: EPHORASL-7.42-debug
+          name: EPHORASL-7.74-real-sl-debug
           path: app/build/outputs/apk/debug/*.apk
