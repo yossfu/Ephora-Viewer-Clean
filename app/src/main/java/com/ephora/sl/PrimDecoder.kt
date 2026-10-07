@@ -371,8 +371,8 @@ object PrimDecoder {
         val c = colors[i]
         val mg = media?.get(i)?.getOrNull(0)?.toInt()?.and(0x06) ?: 0
         return TextureFace(uuid, sc, tc, so / 32767f, to / 32767f, (ro / 32768f) * (Math.PI * 2.0).toFloat(),
-          (255 - (c[0].toInt() and 255)) / 255f, (255 - (c[1].toInt() and 255)) / 255f,
-          (255 - (c[2].toInt() and 255)) / 255f, (255 - (c[3].toInt() and 255)) / 255f, mg)
+          (c[0].toInt() and 255) / 255f, (c[1].toInt() and 255) / 255f,
+          (c[2].toInt() and 255) / 255f, (255 - (c[3].toInt() and 255)) / 255f, mg)
       }
       return TextureEntryFields((0 until 45).map(::makeFace))
     } catch (_: Throwable) { return null }
