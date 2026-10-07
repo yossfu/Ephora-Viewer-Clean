@@ -262,7 +262,10 @@ object PrimShapes {
       if (k.path != 16 && k.path != 32 && k.path != 48 && k.path != 128) { try { nFailPath++ } catch(_: Throwable) {}; return null }
       if (k.pathEnd <= k.pathBegin + 0.001f) { try { nFailRango++ } catch(_: Throwable) {}; return null }
       if (k.profileEnd <= k.profileBegin + 0.001f) { try { nFailRango++ } catch(_: Throwable) {}; return null }
-      if (k.path == 16) return buildStraight(k)
+      // Linear prims and flexible prims use a straight extrusion here.
+      // Flexible deformation is driven dynamically by the viewer; until that
+      // simulation exists, a stable straight base is preferable to a false torus.
+      if (k.path == 16 || k.path == 128) return buildStraight(k)
       return buildCircular(k)
     } catch (_: Throwable) {
       return null
@@ -516,12 +519,9 @@ object PrimShapes {
       var si2 = 0
       while (si2 < steps) {
         val r0 = rings[si2]
-        val r1 = rings[(si2 + 1) % rings.size]
-        if (!closed && si2 == steps) break
-        if (closed && si2 == steps) {
-          si2++
-          continue
-        }
+        // Closed circular paths use the duplicated terminal ring. Open paths
+        // must connect consecutive rings only and must never wrap back to ring 0.
+        val r1 = if (closed) rings[(si2 + 1) % rings.size] else rings[si2 + 1]
         val a0 = r0[i]
         val a1 = r0[j]
         val b0 = r1[i]
