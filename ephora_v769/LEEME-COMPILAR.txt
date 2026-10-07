@@ -1,0 +1,45 @@
+EPHORASL 7.57 - ZIP para compilar (base commit c6ecaf9 + mundo-texturas-1 + wire-ids)
+================================================
+Run: https://github.com/yossfu/Ephora-Viewer-Clean/actions/runs/37424518117
+Commit: c6ecaf927f1c962155c1c746d636c0b68bfb22c5
+Mensaje: Prioritize visible world meshes and terrain coverage diagnostics
+Artifact original: EPHORASL-7.42-debug (21.4 MB)
+
+CONTENIDO
+---------
+Este zip es el codigo fuente EXACTO de ese commit, mas:
+  COMPILAR-APK.bat  -> doble clic para compilar en Windows
+  LEEME-COMPILAR.txt -> este archivo
+
+FLUJO PARA MODIFICAR
+--------------------
+1. Descomprime el zip donde quieras, ej: C:\Ephora\
+2. Modifica lo que necesites en app\src\main\java\com\ephora\sl\
+   - MainActivity.kt (UI, 51 KB)
+   - AgentLoop.kt, PrimDecoder.kt, SlWorldRenderer.kt, etc.
+   - Disenos en app\src\main\res\layout\activity_main.xml
+   - Nativo en app\src\main\cpp\native-lib.cpp
+3. Doble clic en COMPILAR-APK.bat
+4. El APK sale en APK-SALIDA\ (ej: app-debug.apk)
+
+REQUISITOS (el .bat los verifica/instala solo)
+----------------------------------------------
+- Windows 10/11 64-bit
+- Java 17 (Temurin): https://adoptium.net/temurin/releases/?version=17
+- Android SDK con (el .bat los instala via sdkmanager):
+    platform-tools, platforms;android-34, build-tools;34.0.0,
+    ndk;27.0.12077973, cmake;3.22.1
+  Igual que .github\workflows\build.yml del repo.
+- Internet (primera vez descarga Gradle 8.10.2 + dependencias)
+
+CONFIG
+------
+- versionCode 125, versionName 7.57 (base c6ecaf9 era 110/7.42)
+- applicationId com.ephora.sl, minSdk 29, targetSdk 34, compileSdk 34
+- ndk 27.0.12077973, solo arm64-v8a
+- Si tu SDK no esta en %LOCALAPPDATA%\Android\Sdk, edita el .bat linea SET ANDROID_HOME.
+
+NOTA
+----
+El APK compilado por GitHub (artifact) NO se puede descargar sin login.
+Este zip te deja recompilar el MISMO commit en local y seguir modificando.
