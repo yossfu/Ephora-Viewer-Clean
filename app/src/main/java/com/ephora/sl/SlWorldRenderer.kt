@@ -13,7 +13,6 @@ import java.nio.FloatBuffer
 import java.nio.ShortBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
-import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -72,6 +71,11 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var downX = 0f
   private var downY = 0f
   private var downSpan = 0f
+  private var joystickPointerId = -1
+  private var cameraPointerId = -1
+  private var cameraLastX = 0f
+  private var cameraLastY = 0f
+  var joystickView: VirtualJoystickView? = null
   private var fpsT0 = 0L
   private var fpsFrames = 0
   private var fps = 0
@@ -225,31 +229,110 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     } catch (_: Throwable) {}
   }
 
+  private fun inJoystickZone(x: Float, y: Float): Boolean {
+    return x <= width * 0.42f && y >= height * 0.52f
+  }
+
+  private fun updateJoystickFromEvent(e: MotionEvent, index: Int) {
+    val d = ctx.resources.displayMetrics.density.coerceAtLeast(1f)
+    val cx = 104f * d
+    val cy = height.toFloat() - 104f * d
+    val radius = 65f * d
+    val max = (radius * 0.62f).coerceAtLeast(1f)
+    val dx = e.getX(index) - cx
+    val dy = e.getY(index) - cy
+    val len = kotlin.math.sqrt(dx * dx + dy * dy).coerceAtLeast(0.0001f)
+    val jx: Float
+    val jy: Float
+    if (len > max) {
+      jx = dx / len
+      jy = dy / len
+    } else {
+      jx = dx / max
+      jy = dy / max
+    }
+    val x = jx.coerceIn(-1f, 1f)
+    val y = jy.coerceIn(-1f, 1f)
+    AgentLoop.setJoystick(x, y)
+    joystickView?.setState(x, y, true)
+  }
+
+  private fun releaseJoystick() {
+    joystickPointerId = -1
+    AgentLoop.setJoystick(0f, 0f)
+    joystickView?.setState(0f, 0f, false)
+  }
+
   private fun onTouch(e: MotionEvent) {
     try {
       val now = SystemClock.elapsedRealtime()
       touchCount++
       lastTouch = now
-      if (e.pointerCount > 1) {
-        val dx = e.getX(0) - e.getX(1)
-        val dy = e.getY(0) - e.getY(1)
-        val span = kotlin.math.sqrt(dx * dx + dy * dy)
-        if (e.actionMasked == MotionEvent.ACTION_POINTER_DOWN) downSpan = span
-        else if (e.actionMasked == MotionEvent.ACTION_MOVE && downSpan > 0f) {
-          orbitDistance = (orbitDistance * (downSpan / span.coerceAtLeast(1f))).coerceIn(3.2, 28.0)
-          downSpan = span
+      val action = e.actionMasked
+      if (action == MotionEvent.ACTION_DOWN) {
+        joystickPointerId = -1
+        cameraPointerId = -1
+        if (inJoystickZone(e.x, e.y)) {
+          joystickPointerId = e.getPointerId(0)
+          updateJoystickFromEvent(e, 0)
+        } else {
+          cameraPointerId = e.getPointerId(0)
+          cameraLastX = e.x
+          cameraLastY = e.y
         }
-      } else when (e.actionMasked) {
-        MotionEvent.ACTION_DOWN -> { downX = e.x; downY = e.y }
-        MotionEvent.ACTION_MOVE -> {
-          val dx = e.x - downX; val dy = e.y - downY
-          orbitYaw -= dx * 0.006
-          orbitPitch = (orbitPitch + dy * 0.004).coerceIn(-0.80, 0.95)
-          downX = e.x; downY = e.y
-        }
-        MotionEvent.ACTION_UP -> if (now - lastTap < 350L) recenter()
+        return
       }
-      if (e.actionMasked == MotionEvent.ACTION_UP) lastTap = now
+
+      if (action == MotionEvent.ACTION_POINTER_DOWN) {
+        val i = e.actionIndex
+        if (i >= 0 && i < e.pointerCount) {
+          val id = e.getPointerId(i)
+          if (joystickPointerId < 0 && inJoystickZone(e.getX(i), e.getY(i))) {
+            joystickPointerId = id
+            updateJoystickFromEvent(e, i)
+          } else if (cameraPointerId < 0 && !inJoystickZone(e.getX(i), e.getY(i))) {
+            cameraPointerId = id
+            cameraLastX = e.getX(i)
+            cameraLastY = e.getY(i)
+          }
+        }
+        return
+      }
+
+      if (action == MotionEvent.ACTION_MOVE) {
+        if (joystickPointerId >= 0) {
+          val ji = e.findPointerIndex(joystickPointerId)
+          if (ji >= 0) updateJoystickFromEvent(e, ji)
+        }
+        if (cameraPointerId >= 0) {
+          val ci = e.findPointerIndex(cameraPointerId)
+          if (ci >= 0) {
+            val d = ctx.resources.displayMetrics.density.coerceAtLeast(1f)
+            val dx = (e.getX(ci) - cameraLastX) / d
+            val dy = (e.getY(ci) - cameraLastY) / d
+            orbitYaw -= dx * 0.0065
+            orbitPitch = (orbitPitch + dy * 0.0045).coerceIn(-0.80, 0.95)
+            cameraLastX = e.getX(ci)
+            cameraLastY = e.getY(ci)
+          }
+        }
+        return
+      }
+
+      if (action == MotionEvent.ACTION_POINTER_UP || action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+        val i = e.actionIndex.coerceIn(0, e.pointerCount - 1)
+        val id = e.getPointerId(i)
+        if (id == joystickPointerId) releaseJoystick()
+        if (id == cameraPointerId) {
+          cameraPointerId = -1
+          if (now - lastTap < 350L) recenter()
+          lastTap = now
+        }
+        if (action == MotionEvent.ACTION_CANCEL) {
+          releaseJoystick()
+          cameraPointerId = -1
+        }
+      }
     } catch (_: Throwable) {}
   }
   private var lastTap = 0L
