@@ -30,8 +30,8 @@ object MeshAssets {
   private const val MAX_DECOMPRESSED_BYTES = 32 * 1024 * 1024
   // Keep enough recently-used geometry for the active region view. Visible meshes
   // are pinned separately so background requests cannot evict geometry in use.
-  private const val MAX_CACHE_ENTRIES = 192
-  private const val MAX_PENDING = 256
+  private const val MAX_CACHE_ENTRIES = 256
+  private const val MAX_PENDING = 512
   private const val RETRY_BASE_MS = 2500L
   private const val RETRY_MAX_MS = 60000L
   private const val MAX_VERTICES_PER_FACE = 65535
@@ -151,7 +151,7 @@ object MeshAssets {
   /** Refresh the active set each render frame; visible misses are queued ahead of background assets. */
   fun updateVisibleMeshes(meshIds: Collection<String>) {
     val ids = meshIds.asSequence().map { it.trim().lowercase(Locale.US) }
-      .filter(::isUuid).distinct().take(256).toList()
+      .filter(::isUuid).distinct().take(WorldRenderConfig.MESH_VISIBLE_WINDOW).toList()
     synchronized(lock) {
       visible.clear()
       visible.addAll(ids)
