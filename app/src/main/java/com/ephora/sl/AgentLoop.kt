@@ -562,7 +562,6 @@ object AgentLoop {
   }
 
   var lastMovementFlags = 0
-  var lastReqMultT = 0L
   var sx = 0.0
   var sy = 0.0
   var sz = 0.0
