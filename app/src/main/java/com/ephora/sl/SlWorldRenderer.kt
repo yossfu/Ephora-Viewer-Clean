@@ -346,7 +346,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       val cux = cry * caz - crz * cay
       val cuy = crz * cax - crx * caz
       val cuz = crx * cay - cry * cax
-      try { AgentLoop.camVec = floatArrayOf(slEx.toFloat(), slEy.toFloat(), slEz.toFloat(), cax.toFloat(), cay.toFloat(), caz.toFloat(), (-crx).toFloat(), (-cry).toFloat(), (-crz).toFloat(), cux.toFloat(), cuy.toFloat(), cuz.toFloat()) } catch(_: Throwable) {}
+      try { AgentLoop.camVec = floatArrayOf(slEx.toFloat(), slEy.toFloat(), slEz.toFloat(), cax.toFloat(), cay.toFloat(), caz.toFloat(), (-crx).toFloat(), (-cry).toFloat(), (-crz).toFloat(), cux.toFloat(), cuy.toFloat(), cuz.toFloat()); AgentLoop.cameraYaw = orbitYaw.toFloat() } catch(_: Throwable) {}
       Matrix.multiplyMM(vp, 0, projection, 0, camera, 0)
       drawCount = 0
       PrimShapes.budget = 1000
