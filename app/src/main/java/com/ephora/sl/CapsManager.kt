@@ -14,6 +14,36 @@ object CapsManager {
   var rawHasEQ = false
   var lastKeys: List<String> = emptyList()
   val WANT = listOf("EventQueueGet","FetchInventory2","FetchLib2","FetchInventoryDescendents2","GetTexture","ViewerAsset","GetMesh","GetMesh2","ViewerStats","AgentState","UpdateAgentInformation","ChatSessionRequest","EnvironmentSettings","SimulatorFeatures")
+  @Volatile private var lastTextureCapsRefreshMs = 0L
+  @Volatile private var textureCapsRefreshCount = 0L
+
+  /**
+   * Re-acquire region capabilities after an asset CDN 403. The official viewer
+   * treats these URLs as region-scoped and refreshes stale capability URLs.
+   */
+  suspend fun refreshTextureCaps(reason: String = "403"): Boolean = withContext(Dispatchers.IO) {
+    try {
+      val now = System.currentTimeMillis()
+      if (now - lastTextureCapsRefreshMs < 15_000L) return@withContext false
+      val seed = LoginManager.Session.seedCap
+      if (seed.isBlank()) return@withContext false
+      lastTextureCapsRefreshMs = now
+      val line = fetchSeed(seed)
+      textureCapsRefreshCount++
+      try {
+        AgentLoop.onTick?.invoke(
+          "CAPS-TEX-REFRESH reason=" + reason +
+            " n=" + textureCapsRefreshCount + " " + line.take(500)
+        )
+      } catch(_: Throwable) {}
+      caps["ViewerAsset"]?.isNotBlank() == true || caps["GetTexture"]?.isNotBlank() == true
+    } catch(_: Throwable) { false }
+  }
+
+  fun textureCapsStatus(): String =
+    "CAPS-TEX refreshed=" + textureCapsRefreshCount + " ageMs=" +
+      if (lastTextureCapsRefreshMs == 0L) "-" else (System.currentTimeMillis() - lastTextureCapsRefreshMs)
+
   fun seedHostOf(url: String): String {
     return try { java.net.URL(url).host } catch(_: Throwable) { "?" }
   }
