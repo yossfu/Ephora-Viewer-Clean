@@ -1,4 +1,5 @@
 package com.ephora.sl
+import java.util.HashSet
 import kotlinx.coroutines.*
 object TexFetch {
   var done = false
