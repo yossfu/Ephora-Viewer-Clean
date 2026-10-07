@@ -173,41 +173,80 @@ object ImageAssets {
    * J2C/JP2 goes through OpenJPEG; ordinary Android image formats use
    * BitmapFactory. The raw bytes are retained for cache/diagnostics.
    */
+  /**
+   * HTTP texture ingestion is synchronous by design: the fetch worker must know
+   * that this response really decoded before it abandons the next capability.
+   * UDP ingestion remains asynchronous through decode().
+   */
   fun acceptHttpTexture(uuid: String, contentType: String, data: ByteArray): Boolean {
     val key = uuid.lowercase()
     if (data.isEmpty() || data.size > MAX_COMPRESSED) return false
-    val ct = contentType.lowercase()
     synchronized(this) {
       if (bitmaps.containsKey(key)) return true
       putRawLocked(key, data)
-      httpCompleteCount++
     }
 
-    if (ct.contains("j2c") || ct.contains("j2k") || ct.contains("jp2") || ct.contains("jpeg2000")) {
-      decode(key, J2C_IMAGE_CODEC, data)
-      return true
+    val ct = contentType.lowercase()
+    val looksJ2k = ct.contains("j2c") || ct.contains("j2k") || ct.contains("jp2") ||
+      ct.contains("jpeg2000") ||
+      (data.size >= 2 && data[0] == 0xFF.toByte() && data[1] == 0x4F.toByte()) ||
+      (data.size >= 12 && data[4] == 0x6A.toByte() && data[5] == 0x50.toByte() &&
+        data[6] == 0x20.toByte() && data[7] == 0x20.toByte())
+
+    val bitmap = if (looksJ2k) {
+      decodeToBitmapSync(key, data)
+    } else {
+      try { BitmapFactory.decodeByteArray(data, 0, data.size) } catch (_: Throwable) { null }
     }
 
-    val bitmap = try { BitmapFactory.decodeByteArray(data, 0, data.size) } catch (_: Throwable) { null }
-    if (bitmap != null) {
-      synchronized(this) {
-        bitmaps[key] = bitmap
-        decodedCount++
-        lastResult = "ok:" + key + ":" + bitmap.width + "x" + bitmap.height + ":android"
+    if (bitmap == null) {
+      // Last chance for capability implementations that omit/mislabel Content-Type.
+      return if (!looksJ2k) decodeToBitmapSync(key, data) else false
+    }
+
+    synchronized(this) {
+      if (bitmaps.containsKey(key)) {
+        try { bitmap.recycle() } catch (_: Throwable) {}
+        return true
       }
-      try {
-        AgentLoop.onTick?.invoke(
-          "TEX-BITMAP-OK id8=" + key.take(8) +
-            " size=" + bitmap.width + "x" + bitmap.height + " ct=" + contentType
-        )
-      } catch (_: Throwable) {}
-      return true
+      bitmaps[key] = bitmap
+      httpCompleteCount++
+      decodedCount++
+      lastResult = "ok:" + key + ":" + bitmap.width + "x" + bitmap.height + ":http"
     }
-
-    // Some capability implementations omit Content-Type. Let OpenJPEG make
-    // the final decision from the codestream/container header.
-    decode(key, J2C_IMAGE_CODEC, data)
+    try {
+      AgentLoop.onTick?.invoke(
+        "TEX-HTTP-DECODE-OK id8=" + key.take(8) +
+          " size=" + bitmap.width + "x" + bitmap.height +
+          " ct=" + contentType
+      )
+    } catch (_: Throwable) {}
     return true
+  }
+
+  private fun decodeToBitmapSync(uuid: String, compressed: ByteArray): Bitmap? {
+    return try {
+      val pixels = J2kDecoder.decodeNative(compressed) ?: return null
+      if (pixels.size < 8) return null
+      val bb = ByteBuffer.wrap(pixels).order(ByteOrder.LITTLE_ENDIAN)
+      val width = bb.int
+      val height = bb.int
+      if (width < 1 || height < 1 || width > 4096 || height > 4096) return null
+      val needed = 8L + width.toLong() * height.toLong() * 4L
+      if (needed > pixels.size.toLong()) return null
+      val argb = IntArray(width * height)
+      var o = 8
+      for (i in argb.indices) {
+        val r = pixels[o++].toInt() and 255
+        val g = pixels[o++].toInt() and 255
+        val b = pixels[o++].toInt() and 255
+        val a = pixels[o++].toInt() and 255
+        argb[i] = (a shl 24) or (r shl 16) or (g shl 8) or b
+      }
+      Bitmap.createBitmap(argb, width, height, Bitmap.Config.ARGB_8888)
+    } catch (_: Throwable) {
+      null
+    }
   }
 
   fun acceptHttpJ2c(uuid: String, data: ByteArray): Boolean =
