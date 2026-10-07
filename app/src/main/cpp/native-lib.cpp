@@ -55,7 +55,15 @@ extern "C" JNIEXPORT jbyteArray JNICALL Java_com_ephora_sl_J2kDecoder_decodeNati
   if (env->ExceptionCheck()) { env->ExceptionClear(); return nullptr; }
   opj_dparameters_t params;
   opj_set_default_decoder_parameters(&params);
-  opj_codec_t* codec = opj_create_decompress(OPJ_CODEC_J2K);
+  const bool isJp2 =
+      input_size >= 12 &&
+      static_cast<uint8_t>(compressed[4]) == 0x6A &&
+      static_cast<uint8_t>(compressed[5]) == 0x50 &&
+      static_cast<uint8_t>(compressed[6]) == 0x20 &&
+      static_cast<uint8_t>(compressed[7]) == 0x20;
+
+  // J2C codestream starts FF 4F; JP2 is a file container with 'jP  ' at +4.
+  opj_codec_t* codec = opj_create_decompress(isJp2 ? OPJ_CODEC_JP2 : OPJ_CODEC_J2K);
   if (!codec) return nullptr;
   opj_set_error_handler(codec, quiet_message, nullptr);
   opj_set_warning_handler(codec, quiet_message, nullptr);

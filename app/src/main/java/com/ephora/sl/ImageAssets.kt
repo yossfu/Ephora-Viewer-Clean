@@ -1,6 +1,7 @@
 package com.ephora.sl
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.LinkedHashMap
@@ -167,17 +168,50 @@ object ImageAssets {
     return if (offset == transfer.expected) out else null
   }
 
-  fun acceptHttpJ2c(uuid: String, data: ByteArray): Boolean {
+  /**
+   * Accept a texture returned by ViewerAsset/GetTexture.
+   * J2C/JP2 goes through OpenJPEG; ordinary Android image formats use
+   * BitmapFactory. The raw bytes are retained for cache/diagnostics.
+   */
+  fun acceptHttpTexture(uuid: String, contentType: String, data: ByteArray): Boolean {
     val key = uuid.lowercase()
     if (data.isEmpty() || data.size > MAX_COMPRESSED) return false
+    val ct = contentType.lowercase()
     synchronized(this) {
       if (bitmaps.containsKey(key)) return true
       putRawLocked(key, data)
       httpCompleteCount++
     }
+
+    if (ct.contains("j2c") || ct.contains("j2k") || ct.contains("jp2") || ct.contains("jpeg2000")) {
+      decode(key, J2C_IMAGE_CODEC, data)
+      return true
+    }
+
+    val bitmap = try { BitmapFactory.decodeByteArray(data, 0, data.size) } catch (_: Throwable) { null }
+    if (bitmap != null) {
+      synchronized(this) {
+        bitmaps[key] = bitmap
+        decodedCount++
+        lastResult = "ok:" + key + ":" + bitmap.width + "x" + bitmap.height + ":android"
+      }
+      try {
+        AgentLoop.onTick?.invoke(
+          "TEX-BITMAP-OK id8=" + key.take(8) +
+            " size=" + bitmap.width + "x" + bitmap.height + " ct=" + contentType
+        )
+      } catch (_: Throwable) {}
+      return true
+    }
+
+    // Some capability implementations omit Content-Type. Let OpenJPEG make
+    // the final decision from the codestream/container header.
     decode(key, J2C_IMAGE_CODEC, data)
     return true
   }
+
+  fun acceptHttpJ2c(uuid: String, data: ByteArray): Boolean =
+    acceptHttpTexture(uuid, "image/x-j2c", data)
 
   private fun decode(uuid: String, codec: Int, compressed: ByteArray) {
     synchronized(this) {

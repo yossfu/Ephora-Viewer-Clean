@@ -170,7 +170,7 @@ object TexFetch {
       try {
         val http = okhttp3.Request.Builder()
           .url(url)
-          .header("Accept", "image/x-j2c")
+          .header("Accept", "image/x-j2c, image/jp2, image/jpeg, image/png, image/webp, image/*")
           .header("Accept-Encoding", "identity")
           .header("User-Agent", "EPHORASL/7.70")
           .build()
@@ -204,6 +204,7 @@ object TexFetch {
                       "TEX-HTTP-OK id8=" + request.uuid.take(8) +
                         " bytes=" + body.size +
                         " code=" + response.code +
+                        " ct=" + contentType +
                         " base=" + if (index == 0) "ViewerAsset" else "GetTexture"
                     )
                   } catch (_: Throwable) {}
