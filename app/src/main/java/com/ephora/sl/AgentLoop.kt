@@ -15,6 +15,16 @@ object AgentLoop {
   @Volatile var joystickX = 0f
   @Volatile var joystickY = 0f
   @Volatile var cameraYaw = 0f
+
+  // Server-authoritative position. px/py/pz remain the smooth predicted/render
+  // position between the simulator's coarse (1 m) corrections.
+  @Volatile var serverPx = 128.0
+  @Volatile var serverPy = 128.0
+  @Volatile var serverPz = 25.0
+  @Volatile var serverPositionValid = false
+  private var lastReconcileLogMs = 0L
+  @Volatile var lastFarSent = WorldRenderConfig.START_FAR_METERS
+
   fun setJoystick(x: Float, y: Float) { joystickX=x.coerceIn(-1f,1f); joystickY=y.coerceIn(-1f,1f) }
   private fun joystickFlags(): Int {
     val x=joystickX; val y=joystickY; var f=0
@@ -456,18 +466,19 @@ object AgentLoop {
           val prey = ibb.short.toInt()
           if (you >= 0 && you < pts.size) {
             val me = pts[you]
-            val ox = px
-            val oy = py
-            val oz = pz
-            px = me.first
-            py = me.second
-            pz = me.third
-            val moved = Math.sqrt((px - ox) * (px - ox) + (py - oy) * (py - oy) + (pz - oz) * (pz - oz))
+            val ox = serverPx
+            val oy = serverPy
+            val oz = serverPz
+            serverPx = me.first
+            serverPy = me.second
+            serverPz = me.third
+            serverPositionValid = true
+            val moved = Math.sqrt((serverPx - ox) * (serverPx - ox) + (serverPy - oy) * (serverPy - oy) + (serverPz - oz) * (serverPz - oz))
             val now2 = System.currentTimeMillis()
             if (!posCoarseInit || moved > 2.0 || now2 - posCoarseLastEmit > 60000L) {
               posCoarseInit = true
               posCoarseLastEmit = now2
-              try { onTick?.invoke("POS-COARSE you=" + you + " prey=" + prey + " pos=" + posStr()) } catch(_: Throwable) {}
+              try { onTick?.invoke("POS-COARSE you=" + you + " prey=" + prey + " server=" + "%.1f,%.1f,%.1f".format(serverPx,serverPy,serverPz) + " predicted=" + posStr()) } catch(_: Throwable) {}
             }
           }
         }
@@ -506,6 +517,50 @@ object AgentLoop {
     return resendSameSeq()
   }
   var movFlags = 0
+  var lastReqMultT = 0L
+
+  private fun hasActiveMovement(flags: Int): Boolean = (flags and 0x0F) != 0
+
+  private fun reconcilePredicted(dt: Double) {
+    try {
+      if (!serverPositionValid) return
+      val ex = serverPx - px
+      val ey = serverPy - py
+      val ez = serverPz - pz
+      val err = Math.sqrt(ex * ex + ey * ey + ez * ez)
+      if (!err.isFinite()) return
+
+      // CoarseLocationUpdate is deliberately low precision. Do not snap the
+      // rendered/camera position for ordinary network latency; only large
+      // discontinuities are treated as a teleport/correction.
+      if (err > 8.0) {
+        px = serverPx
+        py = serverPy
+        pz = serverPz
+        return
+      }
+
+      val gain = if (hasActiveMovement(lastMovementFlags)) 1.8 else 5.0
+      val alpha = (1.0 - Math.exp(-gain * dt)).coerceIn(0.0, 1.0)
+      px += ex * alpha
+      py += ey * alpha
+      pz += ez * alpha
+
+      val now = System.currentTimeMillis()
+      if (err > 1.5 && now - lastReconcileLogMs > 5000L) {
+        lastReconcileLogMs = now
+        try {
+          onTick?.invoke(
+            "POS-RECON err=" + "%.2f".format(err) +
+              " server=" + "%.1f,%.1f,%.1f".format(serverPx,serverPy,serverPz) +
+              " predicted=" + posStr()
+          )
+        } catch(_: Throwable) {}
+      }
+    } catch(_: Throwable) {}
+  }
+
+  var lastMovementFlags = 0
   var lastReqMultT = 0L
   var sx = 0.0
   var sy = 0.0
@@ -588,6 +643,11 @@ object AgentLoop {
               px = x.toDouble()
               py = y.toDouble()
               pz = z.toDouble()
+              serverPx = px
+              serverPy = py
+              serverPz = pz
+              serverPositionValid = true
+              lastMovementFlags = 0
               try { onTick?.invoke("POS-SIM x=" + x + " y=" + y + " z=" + z) } catch(_: Throwable) {}
               try { sendThrottle("entrada") } catch(_: Throwable) {}
             }
@@ -716,6 +776,15 @@ object AgentLoop {
     try { throttleLastMs = 0L } catch(_: Throwable) {}
     try { throttleLastTag = "-" } catch(_: Throwable) {}
     try { PrimDecoder.texIdsReset() } catch(_: Throwable) {}
+    try {
+      WorldRenderConfig.reset()
+      lastFarSent = WorldRenderConfig.START_FAR_METERS
+      serverPx = px
+      serverPy = py
+      serverPz = pz
+      serverPositionValid = false
+      lastMovementFlags = 0
+    } catch(_: Throwable) {}
     try { PrimDecoder.onTexLine = { tl -> try { onTick?.invoke(tl) } catch(_: Throwable) {} } } catch(_: Throwable) {}
     job = scope.launch(Dispatchers.IO) {
       var sock: DatagramSocket? = null
@@ -733,6 +802,7 @@ object AgentLoop {
         var t0 = System.currentTimeMillis()
         var last = System.currentTimeMillis()
         var lastAuSend = 0L
+        var lastStreamKick = 0L
         var burstMax = 0
         var burstT0 = System.currentTimeMillis()
         while (isActive) {
@@ -740,6 +810,7 @@ object AgentLoop {
           val dt = ((now - last).coerceIn(1L, 500L)) / 1000.0
           last = now
           val f = joystickFlags() or controlFlags
+          lastFarSent = WorldRenderConfig.advanceFar(now)
           val buttonX = when {
             (f and 8) != 0 && (f and 4) == 0 -> 1f
             (f and 4) != 0 && (f and 8) == 0 -> -1f
@@ -756,7 +827,7 @@ object AgentLoop {
             lastAuSend = now
           try {
             val cv = camVec
-            val b = UdpCircuit.agentUpdate(s.agentId, s.sessionId, f, cv[0], cv[1], cv[2], 512f, cameraYaw, cameraYaw, cv[3], cv[4], cv[5], cv[6], cv[7], cv[8], cv[9], cv[10], cv[11])
+            val b = UdpCircuit.agentUpdate(s.agentId, s.sessionId, f, cv[0], cv[1], cv[2], lastFarSent, cameraYaw, cameraYaw, cv[3], cv[4], cv[5], cv[6], cv[7], cv[8], cv[9], cv[10], cv[11])
             sock.send(DatagramPacket(b, b.size, addr, s.simPort))
             tx++
             val hx = UdpCircuit.txHex("AgentUpdate", UdpCircuit.lastSeq(), b)
@@ -764,8 +835,9 @@ object AgentLoop {
             if (f != 0 || now - t0 >= 10000) lastAuHex = hx
           } catch(_: Throwable) {}
           }
-          if (f != 0) {
+          if (hasActiveMovement(f)) {
             if (!movOn) { movOn = true; movFlags = f; sx = px; sy = py; sz = pz }
+            lastMovementFlags = f
             val mag = kotlin.math.sqrt((moveX*moveX + moveY*moveY).toDouble()).coerceAtMost(1.0)
             if (mag > 0.05) {
               val speed = 3.2 * (if (mag > 0.82) 1.35 else 1.0) * dt
@@ -778,8 +850,10 @@ object AgentLoop {
             }
           } else if (movOn) {
             movOn = false
+            lastMovementFlags = 0
             try { onTick?.invoke("MOV flags=" + movFlags + " pos=" + "%.1f,%.1f,%.1f".format(sx, sy, sz) + "->" + posStr() + " coarse=" + (if (coarseSeen) "si" else "no")) } catch(_: Throwable) {}
           }
+          reconcilePredicted(dt)
           var burst = 0
           try {
             while (true) {
@@ -857,6 +931,18 @@ object AgentLoop {
             burstMax = 0
           }
           if (now % 2000L < 25L) { try { retryMissingImagePackets("tick") } catch(_: Throwable) {} }
+          if (now - lastStreamKick >= 1000L) {
+            lastStreamKick = now
+            try {
+              if (loopSock != null && loopAddr != null) {
+                val textureIds = try {
+                  (TerrainComposition.textureIds() + PrimDecoder.texList(px, py, pz, WorldRenderConfig.TEXTURE_IDS_WINDOW) + AvatarAppearanceState.textures()).distinct()
+                } catch(_: Throwable) { emptyList<String>() }
+                try { TexFetch.requestVisible(textureIds, WorldRenderConfig.TEXTURE_REQUESTS_PER_KICK) } catch(_: Throwable) {}
+                try { sendImageReqBody("stream") } catch(_: Throwable) {}
+              }
+            } catch(_: Throwable) {}
+          }
           if (now - t0 >= 10000) {
             t0 = now
             lastTick = "tick10s tx=" + tx
