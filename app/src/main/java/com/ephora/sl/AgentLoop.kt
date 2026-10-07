@@ -294,11 +294,12 @@ object AgentLoop {
         if (ImageAssets.has(u)) continue
         if (ImageAssets.hasPending(u) || now - (imgReqTime[u] ?: now) < 20_000L) active++
       }
-      if (active >= 2) return false
+      val udpBudget = WorldRenderConfig.UDP_TEXTURE_ACTIVE
+      if (active >= udpBudget) return false
 
       var sent = 0
       for (u in ids) {
-        if (sent >= 2 - active) break
+        if (sent >= udpBudget - active) break
         try { java.util.UUID.fromString(u) } catch (_: Throwable) { continue }
         if (ImageAssets.has(u)) continue
 
