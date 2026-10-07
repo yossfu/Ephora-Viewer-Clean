@@ -24,8 +24,8 @@ import java.util.concurrent.TimeUnit
  */
 object TexFetch {
   private const val MAX_WORKERS = 4
-  private const val MAX_QUEUE = 256
-  private const val MAX_RETRIES = 2
+  private const val MAX_QUEUE = 768
+  private const val MAX_RETRIES = 4
   private const val MAX_BYTES = 16 * 1024 * 1024
 
   private data class Request(
