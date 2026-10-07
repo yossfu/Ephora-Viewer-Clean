@@ -243,6 +243,7 @@ object TexFetch {
       } catch (_: Throwable) {}
     }
     return false
+    }
   }
 
   fun status(): String {
