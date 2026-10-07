@@ -13,6 +13,7 @@ import java.nio.FloatBuffer
 import java.nio.ShortBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -78,6 +79,9 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var touchCount = 0L
   private var lastTouch = 0L
   private var lastFrame = 0L
+  private var lastFrameNanos = 0L
+  private var followInitialized = false
+  private val cameraFar = 512f
   @Volatile private var firstFrameLatencyMs = -1L
   @Volatile private var glSurfaceCreated = false
   @Volatile private var glSurfaceChanged = false
@@ -86,7 +90,8 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var sceneObjects = 0
   private var meshReferences = 0
   private var meshObjects = 0
-  private val glTextures = LinkedHashMap<String, Int>()
+  private val glTextures = LinkedHashMap<String, Int>(256, 0.75f, true)
+  private var uploadsThisFrame = 0
   private var texturedObjects = 0
   @Volatile private var frPub = 0
   @Volatile private var frCull = 0
@@ -143,7 +148,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     return doubleArrayOf(x+qw*tx+(qy*tz-qz*ty),y+qw*ty+(qz*tx-qx*tz),z+qw*tz+(qx*ty-qy*tx))
   }
   private fun poseOf(o:PrimDecoder.Prim,map:Map<Long,PrimDecoder.Prim>,depth:Int=0):Pose{
-    if(depth>=2||o.parentId<=0L)return Pose(o.x,o.y,o.z,o.rotX,o.rotY,o.rotZ,o.rotW)
+    if(depth>=16||o.parentId<=0L)return Pose(o.x,o.y,o.z,o.rotX,o.rotY,o.rotZ,o.rotW)
     val parent=map[o.parentId]?:return Pose(o.x,o.y,o.z,o.rotX,o.rotY,o.rotZ,o.rotW)
     val p=poseOf(parent,map,depth+1)
     val v=qRotate(p.qx,p.qy,p.qz,p.qw,o.x,o.y,o.z)
@@ -164,7 +169,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       view = surface
       if (configuredSurface !== surface) {
         surface.setEGLContextClientVersion(2)
-        surface.setEGLConfigChooser(8, 8, 8, 0, 16, 0)
+        surface.setEGLConfigChooser(8, 8, 8, 0, 24, 8)
         surface.preserveEGLContextOnPause = true
         surface.setRenderer(this)
         configuredSurface = surface
@@ -231,7 +236,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
         val span = kotlin.math.sqrt(dx * dx + dy * dy)
         if (e.actionMasked == MotionEvent.ACTION_POINTER_DOWN) downSpan = span
         else if (e.actionMasked == MotionEvent.ACTION_MOVE && downSpan > 0f) {
-          orbitDistance = (orbitDistance * (downSpan / span.coerceAtLeast(1f))).coerceIn(3.0, 180.0)
+          orbitDistance = (orbitDistance * (downSpan / span.coerceAtLeast(1f))).coerceIn(3.2, 28.0)
           downSpan = span
         }
       } else when (e.actionMasked) {
@@ -239,7 +244,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
         MotionEvent.ACTION_MOVE -> {
           val dx = e.x - downX; val dy = e.y - downY
           orbitYaw -= dx * 0.006
-          orbitPitch = (orbitPitch + dy * 0.004).coerceIn(-1.15, 1.15)
+          orbitPitch = (orbitPitch + dy * 0.004).coerceIn(-0.80, 0.95)
           downX = e.x; downY = e.y
         }
         MotionEvent.ACTION_UP -> if (now - lastTap < 350L) recenter()
@@ -250,8 +255,18 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var lastTap = 0L
   private fun recenter() {
     targetX = AgentLoop.px - 128.0
-    targetY = AgentLoop.pz
+    targetY = AgentLoop.pz + 1.0
     targetZ = -(AgentLoop.py - 128.0)
+    followInitialized = true
+  }
+  fun resetCamera() {
+    orbitYaw = 0.25
+    orbitPitch = 0.16
+    orbitDistance = 8.0
+    targetX = AgentLoop.px - 128.0
+    targetY = AgentLoop.pz + 1.0
+    targetZ = -(AgentLoop.py - 128.0)
+    followInitialized = true
   }
 
   override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -259,7 +274,9 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       GLES20.glClearColor(0.34f, 0.55f, 0.78f, 1f)
       GLES20.glEnable(GLES20.GL_DEPTH_TEST)
       GLES20.glDepthFunc(GLES20.GL_LEQUAL)
+      GLES20.glDepthMask(true)
       GLES20.glDisable(GLES20.GL_BLEND)
+      GLES20.glDisable(GLES20.GL_CULL_FACE)
       program = linkProgram(VERTEX, FRAGMENT)
       posLoc = GLES20.glGetAttribLocation(program, "aPosition")
       normalLoc = GLES20.glGetAttribLocation(program, "aNormal")
@@ -294,7 +311,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   override fun onSurfaceChanged(gl: GL10?, w: Int, h: Int) {
     width = w.coerceAtLeast(1); height = h.coerceAtLeast(1)
     GLES20.glViewport(0, 0, width, height)
-    Matrix.perspectiveM(projection, 0, 54f, width.toFloat() / height.toFloat(), 0.1f, 1800f)
+    Matrix.perspectiveM(projection, 0, 54f, width.toFloat() / height.toFloat(), 0.25f, cameraFar)
     glSurfaceChanged = true
     lastFase = "GLES-superficie-${width}x$height"
   }
@@ -306,7 +323,24 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       GLES20.glUseProgram(program)
       val objects = AgentLoop.objetos
       val p = AgentLoop.px - 128.0; val q = AgentLoop.pz; val r = -(AgentLoop.py - 128.0)
-      targetX = p; targetY = q; targetZ = r
+      val desiredTargetX = p
+      val desiredTargetY = q + 1.05
+      val desiredTargetZ = r
+      if (!followInitialized || !targetX.isFinite() || !targetY.isFinite() || !targetZ.isFinite()) {
+        targetX = desiredTargetX
+        targetY = desiredTargetY
+        targetZ = desiredTargetZ
+        followInitialized = true
+      } else {
+        val nowNanos = System.nanoTime()
+        val dt = if (lastFrameNanos == 0L) 1f / 60f else ((nowNanos - lastFrameNanos).coerceIn(0L, 100_000_000L) / 1_000_000_000.0).toFloat()
+        lastFrameNanos = nowNanos
+        val a = (1f - kotlin.math.exp((-dt * 14f).toDouble()).toFloat()).coerceIn(0f, 1f)
+        targetX += (desiredTargetX - targetX) * a
+        targetY += (desiredTargetY - targetY) * a
+        targetZ += (desiredTargetZ - targetZ) * a
+      }
+      AgentLoop.cameraYaw = orbitYaw.toFloat()
       val cp = cos(orbitPitch); val sp = sin(orbitPitch)
       val eyeX = targetX + cos(orbitYaw) * cp * orbitDistance
       val eyeY = targetY + sp * orbitDistance
@@ -343,23 +377,29 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       drawCount = 0
       PrimShapes.budget = 1000
       texturedObjects = 0
+      uploadsThisFrame = 0
       meshReferences = 0
       meshObjects = 0
       updateTerrain()
       drawTerrain()
       if (DRAW_WATER_SURFACE) drawWater()
-      drawAvatar(p, q, r)
+      drawAvatar(p, q, r, AgentLoop.bodyYaw)
       val n = objects.size.coerceAtMost(MAX_OBJECTS)
-      val minX = eyeX - 220.0; val maxX = eyeX + 220.0
-      val minZ = eyeZ - 220.0; val maxZ = eyeZ + 220.0
+      val renderRadiusSq = (cameraFar.toDouble() * 0.98).let { it * it }
       val objMap=HashMap<Long,PrimDecoder.Prim>(objects.size)
       for(o in objects)objMap[o.id]=o
       val visibleMeshIds=ArrayList<String>()
       for(i in 0 until n){
-        val o=objects[i]; val pose=poseOf(o,objMap); val x=pose.x-128.0; val z=-(pose.y-128.0)
-        if(o.tipo!=47&&o.meshId.isNotEmpty()&&x in minX..maxX&&z in minZ..maxZ)visibleMeshIds.add(o.meshId)
+        val o=objects[i]
+        val pose=poseOf(o,objMap)
+        val x=pose.x-128.0
+        val z=-(pose.y-128.0)
+        val dx=x-targetX
+        val dz=z-targetZ
+        if(o.tipo!=47&&o.meshId.isNotEmpty()&&dx*dx+dz*dz<=renderRadiusSq)visibleMeshIds.add(o.meshId)
       }
       MeshAssets.updateVisibleMeshes(visibleMeshIds)
+      try { ImageAssets.touchIds(objects.asSequence().take(n).flatMap { it.texFaces.asSequence() }.map { it.uuid }.filter { it.isNotBlank() }.take(96).toList()) } catch (_: Throwable) {}
       frPub = n
       frCull = 0
       frMesh = 0
@@ -376,7 +416,9 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
         val o = objects[i]
         val pose=poseOf(o,objMap)
         val x=pose.x-128.0; val y=pose.z; val z=-(pose.y-128.0)
-        if (x < minX || x > maxX || z < minZ || z > maxZ) { try { frCull++ } catch(_: Throwable) {}; continue }
+        val dx = x - targetX
+        val dz = z - targetZ
+        if (dx * dx + dz * dz > renderRadiusSq) { try { frCull++ } catch(_: Throwable) {}; continue }
         val sx = o.sx.coerceIn(0.05f, 64f); val sy = o.sy.coerceIn(0.05f, 64f); val sz = o.sz.coerceIn(0.05f, 64f)
         val isAvatar = o.tipo == 47
         val color = when {
@@ -437,7 +479,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
             }
           }
         } else if (isAvatar) {
-          drawMesh(mesh, vertexCount, x, y, z, sx, sy, sz, o.yaw, color)
+          drawAvatar(x, y, z, o.yaw)
         } else {
           // Never fabricate a cube for a real-world object. Until its primitive
           // shape or mesh LOD is decoded, keep it pending/invisible. This avoids
@@ -513,6 +555,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     val key = uuid.lowercase()
     glTextures[key]?.let { return it }
     val bitmap = ImageAssets.bitmap(key) ?: return 0
+    if (uploadsThisFrame >= 3) return 0
     val names = IntArray(1)
     GLES20.glGenTextures(1, names, 0)
     val id = names[0]
@@ -547,6 +590,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       return 0
     }
     glTextures[key] = id
+    uploadsThisFrame++
     while (glTextures.size > 192) {
       val oldestKey = glTextures.keys.firstOrNull { it !in TerrainComposition.textureIds().map(String::lowercase) } ?: break
       val oldest = glTextures.remove(oldestKey) ?: continue
@@ -610,8 +654,19 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     GLES20.glDepthMask(true)
     GLES20.glDisable(GLES20.GL_BLEND)
   }
-  private fun drawAvatar(x: Double, y: Double, z: Double) {
-    drawMesh(sphere, SPHERE_VERTS, x, y + 0.9, z, 0.42f, 0.9f, 0.32f, 0f, floatArrayOf(0.12f, 0.76f, 0.86f, 1f))
+  private fun drawAvatar(x: Double, y: Double, z: Double, yaw: Float = AgentLoop.bodyYaw) {
+    val skin = floatArrayOf(0.72f, 0.83f, 0.92f, 1f)
+    val suit = floatArrayOf(0.18f, 0.55f, 0.78f, 1f)
+    val limb = floatArrayOf(0.12f, 0.34f, 0.50f, 1f)
+    drawMesh(cylinder, CYLINDER_VERTS, x, y + 1.08, z, 0.78f, 0.50f, 1.12f, yaw, suit)
+    drawMesh(cube, CUBE_VERTS, x, y + 0.48, z, 0.62f, 0.52f, 0.36f, yaw, suit)
+    drawMesh(sphere, SPHERE_VERTS, x, y + 1.92, z, 0.62f, 0.62f, 0.62f, 0f, skin)
+    drawMesh(cylinder, CYLINDER_VERTS, x - 0.52, y + 1.08, z, 0.20f, 0.20f, 0.92f, yaw, suit)
+    drawMesh(cylinder, CYLINDER_VERTS, x + 0.52, y + 1.08, z, 0.20f, 0.20f, 0.92f, yaw, suit)
+    drawMesh(cylinder, CYLINDER_VERTS, x - 0.21, y + 0.05, z, 0.22f, 0.22f, 0.92f, yaw, limb)
+    drawMesh(cylinder, CYLINDER_VERTS, x + 0.21, y + 0.05, z, 0.22f, 0.22f, 0.92f, yaw, limb)
+    drawMesh(cube, CUBE_VERTS, x - 0.23, y - 0.47, z - 0.05, 0.30f, 0.46f, 0.22f, yaw, limb)
+    drawMesh(cube, CUBE_VERTS, x + 0.23, y - 0.47, z - 0.05, 0.30f, 0.46f, 0.22f, yaw, limb)
   }
 
   private fun updateTerrain() {
@@ -732,7 +787,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     private const val DRAW_WATER_SURFACE = false
     private const val TERRAIN_RES = 129
     private const val TERRAIN_STEP = 2
-    private const val MAX_OBJECTS = 2048
+    private const val MAX_OBJECTS = 4096
     private const val NULL_TEXTURE_UUID = "00000000-0000-0000-0000-000000000000"
     private const val VERTEX = """
       attribute vec3 aPosition; attribute vec3 aNormal; attribute vec2 aUv; uniform mat4 uMvp; varying vec3 vNormal; varying vec2 vUv; varying vec3 vTerrainPos; varying vec3 vLocalPos;
