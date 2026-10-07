@@ -369,10 +369,18 @@ object PrimDecoder {
         val to = ByteBuffer.wrap(offsetsT[i]).order(ByteOrder.LITTLE_ENDIAN).short.toInt()
         val ro = u16at(rotations[i], 0)
         val c = colors[i]
+        // Second Life TextureEntry RGBA is transmitted inverted on the LLUDP
+        // wire. OpenMetaverse decodes it with Color4(..., inverted=true):
+        // stored 00,00,00,FF means opaque WHITE, while FF,FF,FF,00 means
+        // opaque BLACK. Reading these bytes directly was making the whole
+        // scene look black even though geometry and textures were arriving.
+        val rr = 1f - ((c[0].toInt() and 255) / 255f)
+        val gg = 1f - ((c[1].toInt() and 255) / 255f)
+        val bb = 1f - ((c[2].toInt() and 255) / 255f)
+        val aa = 1f - ((c[3].toInt() and 255) / 255f)
         val mg = media?.get(i)?.getOrNull(0)?.toInt()?.and(0x06) ?: 0
         return TextureFace(uuid, sc, tc, so / 32767f, to / 32767f, (ro / 32768f) * (Math.PI * 2.0).toFloat(),
-          (c[0].toInt() and 255) / 255f, (c[1].toInt() and 255) / 255f,
-          (c[2].toInt() and 255) / 255f, (c[3].toInt() and 255) / 255f, mg)
+          rr, gg, bb, aa, mg)
       }
       return TextureEntryFields((0 until 45).map(::makeFace))
     } catch (_: Throwable) { return null }
