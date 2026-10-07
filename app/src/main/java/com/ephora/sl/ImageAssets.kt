@@ -18,7 +18,7 @@ object ImageAssets {
   private const val MAX_COMPRESSED = 16 * 1024 * 1024
   private const val MAX_BITMAPS = 256
   private const val MAX_PENDING = 384
-  private data class Pending(var expected: Int = 0, var codec: Int = 0, val parts: TreeMap<Int, ByteArray> = TreeMap(), var touched: Long = 0L, var queued: Boolean = false) {
+  private data class Pending(var expected: Int = 0, var codec: Int = 0, var packetCount: Int = 0, val parts: TreeMap<Int, ByteArray> = TreeMap(), var touched: Long = 0L, var queued: Boolean = false, var lastRequestedPacket: Int = -1, var lastRequestMs: Long = 0L) {
     fun byteCount(): Int = parts.values.sumOf { it.size }
   }
   private val pending = LinkedHashMap<String, Pending>()
@@ -65,6 +65,7 @@ object ImageAssets {
         if (size <= 0 || size > MAX_COMPRESSED || len < 0 || 25 + len > payload.size) return null
         entry.expected = size
         entry.codec = codec
+        entry.packetCount = packetN
         sequence = 0
         dataOff = 25
         // Retain expected additional packet count for diagnosis only; byte size defines completion.
@@ -149,9 +150,30 @@ object ImageAssets {
   @Synchronized fun bitmap(uuid: String): Bitmap? = bitmaps[uuid.lowercase()]
   @Synchronized fun has(uuid: String): Boolean = bitmaps.containsKey(uuid.lowercase())
   @Synchronized fun pendingTop(): String {
-    val ids = pending.entries.take(12).map { e -> e.key.take(8) + "=" + e.value.byteCount() + "/" + e.value.expected }
+    val ids = pending.entries.take(12).map { e -> e.key.take(8) + "=" + e.value.byteCount() + "/" + e.value.expected + "/pk=" + e.value.packetCount + "/miss=" + (if (e.value.packetCount > 0) (1..e.value.packetCount).firstOrNull { !e.value.parts.containsKey(it) } ?: -1 else -1) }
     return "IMAGE-PEND-DET n=" + pending.size + " ids=" + (if (ids.isEmpty()) "-" else ids.joinToString(","))
   }
+  /** Returns missing ImagePacket numbers that should be explicitly re-requested. */
+  @Synchronized fun missingRequests(limit: Int = 8, minIntervalMs: Long = 1200L): List<Pair<String, Int>> {
+    val now = System.currentTimeMillis()
+    val out = ArrayList<Pair<String, Int>>()
+    for ((uuid, e) in pending) {
+      if (out.size >= limit) break
+      if (now - e.lastRequestMs < minIntervalMs) continue
+      val first = if (e.packetCount > 0) {
+        var m = -1
+        for (n in 1..e.packetCount) if (!e.parts.containsKey(n)) { m = n; break }
+        m
+      } else if (e.expected > 0 && !e.parts.containsKey(0)) 0 else -1
+      if (first >= 0) {
+        e.lastRequestedPacket = first
+        e.lastRequestMs = now
+        out.add(uuid to first)
+      }
+    }
+    return out
+  }
+
   @Synchronized fun touchIds(ids: List<String>) {
     val now = System.currentTimeMillis()
     for (u in ids) {
