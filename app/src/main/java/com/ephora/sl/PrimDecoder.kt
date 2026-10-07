@@ -911,26 +911,25 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
           put(id, pcode, x, y, z, sx, sy, sz, yw, now, hb[26].toInt() and 0xFF)
         }
         o += ilen
-        // CITA-PLANTILLA ObjectUpdate (message_template.msg): ParentID U32(4)+UpdateFlags U32(4)+PathCurve/ProfileCurve(2)+PathBegin/End(4)+ScaleX/Y+ShearX/Y(4)+Twist..Skew(7)+ProfileBegin/End/Hollow(6)=31B; luego TextureEntry V2 primera. Empirico [00,len-lo]=ProfileHollow-hi+TEntry-len-lo.
-        // NOTA narrow: TextureEntry es Variable 2 por plantilla; leerla en U8 contradice la plantilla (TextureAnim de 50-149B es inverosimil).
+        // CITA-DECODE formas (manda el codigo, no el comentario de la plantilla): LibreMetaverse Primitive.cs UnpackBeginCut/UnpackEndCut/UnpackPathScale/UnpackPathShear/UnpackPathTwist/UnpackPathTaper/UnpackPathRevolutions/UnpackProfileHollow (copia scratch/upstream/LM-Primitive.cs:1537-1631) + OpenSim PrimitiveBaseShape.cs ToPrim (PathEnd=1-raw*2e-5, ProfileEnd=1-raw*2e-5, Scale=(200-raw)*0.01, Shear S8 con signo, Rev=1+raw*0.015; copia scratch/upstream/PrimitiveBaseShape.cs:1427-1445). Los comentarios quanta=0.01 de message_template.msg estan obsoletos: el End va INVERTIDO (raw 0 = sin corte = 1.0).
         if (o + 31 > p.size) { try { stashFullMu("in30", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
         val fPathCurve = p[o + 8].toInt() and 255
         val fProfileCurve = p[o + 9].toInt() and 255
         val fPb = (u16at(p, o + 10) * 0.00002f).coerceIn(0f, 1f)
-        val fPe = (u16at(p, o + 12) * 0.00002f).coerceIn(0f, 1f)
-        val fPsx = (p[o + 14].toInt() and 255) / 100f
-        val fPsy = (p[o + 15].toInt() and 255) / 100f
-        val fShx = (p[o + 16].toInt() and 255) / 100f - 0.5f
-        val fShy = (p[o + 17].toInt() and 255) / 100f - 0.5f
+        val fPe = (1f - u16at(p, o + 12) * 0.00002f).coerceIn(0f, 1f)
+        val fPsx = (200 - (p[o + 14].toInt() and 255)) * 0.01f
+        val fPsy = (200 - (p[o + 15].toInt() and 255)) * 0.01f
+        val fShx = p[o + 16].toInt() / 100f
+        val fShy = p[o + 17].toInt() / 100f
         val fTw = p[o + 18].toInt() / 100f
         val fTwb = p[o + 19].toInt() / 100f
         val fRo = p[o + 20].toInt() / 100f
         val fTpx = p[o + 21].toInt() / 100f
         val fTpy = p[o + 22].toInt() / 100f
-        val fRev = (p[o + 23].toInt() and 255) * 0.015f
+        val fRev = 1f + (p[o + 23].toInt() and 255) * 0.015f
         val fSk = p[o + 24].toInt() / 100f
         val fQb = (u16at(p, o + 25) * 0.00002f).coerceIn(0f, 1f)
-        val fQe = (u16at(p, o + 27) * 0.00002f).coerceIn(0f, 1f)
+        val fQe = (1f - u16at(p, o + 27) * 0.00002f).coerceIn(0f, 1f)
         val fQh = (u16at(p, o + 29) * 0.00002f).coerceIn(0f, 1f)
         o += 31
         try { synchronized(recs) { recs[id]?.let { it.pathCurve = fPathCurve; it.profileCurve = fProfileCurve; it.hasShape = true; it.shPb = fPb; it.shPe = fPe; it.shPsx = fPsx; it.shPsy = fPsy; it.shShx = fShx; it.shShy = fShy; it.shTw = fTw; it.shTwb = fTwb; it.shRo = fRo; it.shTpx = fTpx; it.shTpy = fTpy; it.shRev = fRev; it.shSk = fSk; it.shQb = fQb; it.shQe = fQe; it.shQh = fQh } } } catch(_: Throwable) {}
