@@ -129,6 +129,22 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     try { frPrev.clear() } catch(_: Throwable) {}
     try { frPrev.addAll(ids) } catch(_: Throwable) {}
   }
+  private data class Pose(val x:Double,val y:Double,val z:Double,val qx:Float,val qy:Float,val qz:Float,val qw:Float)
+  private fun qMul(ax:Float,ay:Float,az:Float,aw:Float,bx:Float,by:Float,bz:Float,bw:Float)=floatArrayOf(aw*bx+ax*bw+ay*bz-az*by,aw*by-ax*bz+ay*bw+az*bx,aw*bz+ax*by-ay*bx+az*bw,aw*bw-ax*bx-ay*by-az*bz)
+  private fun qRotate(qx:Float,qy:Float,qz:Float,qw:Float,x:Double,y:Double,z:Double):DoubleArray{
+    val tx=2.0*(qy*z-qz*y);val ty=2.0*(qz*x-qx*z);val tz=2.0*(qx*y-qy*x)
+    return doubleArrayOf(x+qw*tx+(qy*tz-qz*ty),y+qw*ty+(qz*tx-qx*tz),z+qw*tz+(qx*ty-qy*tx))
+  }
+  private fun poseOf(o:PrimDecoder.Prim,map:Map<Long,PrimDecoder.Prim>,depth:Int=0):Pose{
+    if(depth>=2||o.parentId<=0L)return Pose(o.x,o.y,o.z,o.rotX,o.rotY,o.rotZ,o.rotW)
+    val parent=map[o.parentId]?:return Pose(o.x,o.y,o.z,o.rotX,o.rotY,o.rotZ,o.rotW)
+    val p=poseOf(parent,map,depth+1)
+    val v=qRotate(p.qx,p.qy,p.qz,p.qw,o.x,o.y,o.z)
+    val q=qMul(p.qx,p.qy,p.qz,p.qw,o.rotX,o.rotY,o.rotZ,o.rotW)
+    val l=kotlin.math.sqrt(q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3]).coerceAtLeast(1e-6f)
+    return Pose(p.x+v[0],p.y+v[1],p.z+v[2],q[0]/l,q[1]/l,q[2]/l,q[3]/l)
+  }
+
   fun frameLine(): String {
     return "ADV-FRAME pub=" + frPub + " cull=" + frCull + " mesh=" + frMesh + " forma=" + frShaped + " formaTry=" + frShapedTry + " tex=" + frTex + " beige=" + frBeige + " avatar=" + frAvatar + " malla=[" + frMuMesh + "] formaM=[" + frMuShaped + "] texM=[" + frMuTex + "] beigeM=[" + frMuBeige + "] " + frDiffLatch
   }
@@ -329,14 +345,12 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       val n = objects.size.coerceAtMost(MAX_OBJECTS)
       val minX = eyeX - 220.0; val maxX = eyeX + 220.0
       val minZ = eyeZ - 220.0; val maxZ = eyeZ + 220.0
-      val visibleMeshIds = ArrayList<String>()
-      for (i in 0 until n) {
-        val o = objects[i]
-        val x = o.x - 128.0
-        val z = -(o.y - 128.0)
-        if (o.tipo != 47 && o.meshId.isNotEmpty() && x in minX..maxX && z in minZ..maxZ) {
-          visibleMeshIds.add(o.meshId)
-        }
+      val objMap=HashMap<Long,PrimDecoder.Prim>(objects.size)
+      for(o in objects)objMap[o.id]=o
+      val visibleMeshIds=ArrayList<String>()
+      for(i in 0 until n){
+        val o=objects[i]; val pose=poseOf(o,objMap); val x=pose.x-128.0; val z=-(pose.y-128.0)
+        if(o.tipo!=47&&o.meshId.isNotEmpty()&&x in minX..maxX&&z in minZ..maxZ)visibleMeshIds.add(o.meshId)
       }
       MeshAssets.updateVisibleMeshes(visibleMeshIds)
       frPub = n
@@ -353,7 +367,8 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       var sBeigeIds = ""
       for (i in 0 until n) {
         val o = objects[i]
-        val x = o.x - 128.0; val y = o.z; val z = -(o.y - 128.0)
+        val pose=poseOf(o,objMap)
+        val x=pose.x-128.0; val y=pose.z; val z=-(pose.y-128.0)
         if (x < minX || x > maxX || z < minZ || z > maxZ) { try { frCull++ } catch(_: Throwable) {}; continue }
         val sx = o.sx.coerceIn(0.05f, 64f); val sy = o.sy.coerceIn(0.05f, 64f); val sz = o.sz.coerceIn(0.05f, 64f)
         val isAvatar = o.tipo == 47
@@ -391,7 +406,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
             drawMesh(face.vertices, face.vertexCount, x, y, z, sx, sy, sz, o.yaw, tint, tex,
               tf?.scaleS ?: o.texScaleS, tf?.scaleT ?: o.texScaleT,
               tf?.offsetS ?: o.texOffsetS, tf?.offsetT ?: o.texOffsetT, tf?.rotation ?: o.texRotation,
-              tf?.texGen ?: 0)
+              tf?.texGen ?: 0,0,pose.qx,pose.qy,pose.qz,pose.qw)
           }
         } else if (o.meshId.isEmpty() && shaped != null) {
           val face0 = o.texFaces.firstOrNull()
@@ -400,7 +415,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
           drawMesh(shaped.buf, shaped.count, x, y, z, sx, sy, sz, o.yaw, tint0, tex0,
             face0?.scaleS ?: o.texScaleS, face0?.scaleT ?: o.texScaleT,
             face0?.offsetS ?: o.texOffsetS, face0?.offsetT ?: o.texOffsetT,
-            face0?.rotation ?: o.texRotation)
+            face0?.rotation ?: o.texRotation,face0?.texGen ?: 0,0,pose.qx,pose.qy,pose.qz,pose.qw)
         } else if (isAvatar) {
           drawMesh(mesh, vertexCount, x, y, z, sx, sy, sz, o.yaw, color)
         } else {
@@ -436,11 +451,17 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var lastStats = 0L
 
   private fun drawMesh(buffer: FloatBuffer?, vertexCount: Int, x: Double, y: Double, z: Double, sx: Float, sy: Float, sz: Float, yaw: Float, color: FloatArray,
-                       textureUuid: String = "", scaleS: Float = 1f, scaleT: Float = 1f, offsetS: Float = 0f, offsetT: Float = 0f, rotation: Float = 0f, texGen: Int = 0, firstVertex: Int = 0) {
+                       textureUuid: String = "", scaleS: Float = 1f, scaleT: Float = 1f, offsetS: Float = 0f, offsetT: Float = 0f, rotation: Float = 0f, texGen: Int = 0, firstVertex: Int = 0, qx: Float = 0f, qy: Float = 0f, qz: Float = 0f, qw: Float = 1f) {
     val b = buffer ?: return
     Matrix.setIdentityM(model, 0)
     Matrix.translateM(model, 0, x.toFloat(), y.toFloat(), z.toFloat())
-    Matrix.rotateM(model, 0, Math.toDegrees(yaw.toDouble()).toFloat(), 0f, 1f, 0f)
+    val qrx=qx; val qry=qz; val qrz=-qy
+    val qlen=kotlin.math.sqrt(qrx*qrx+qry*qry+qrz*qrz+qw*qw).coerceAtLeast(1e-6f)
+    val nqx=qrx/qlen; val nqy=qry/qlen; val nqz=qrz/qlen; val nqw=qw/qlen
+    val half=Math.acos(nqw.toDouble().coerceIn(-1.0,1.0))
+    val sh=Math.sin(half)
+    if(sh>1e-5) Matrix.rotateM(model,0,Math.toDegrees(half*2.0).toFloat(),nqx,nqy,nqz)
+    else Matrix.rotateM(model,0,Math.toDegrees(yaw.toDouble()).toFloat(),0f,1f,0f)
     // Prim scale is stored in Second Life coordinates X/Y/Z. The renderer
     // uses X/Z/-Y, so its scale order is X, Z, Y.
     Matrix.scaleM(model, 0, sx, sz, sy)

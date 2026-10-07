@@ -4,7 +4,7 @@ import java.nio.ByteOrder
 import java.util.Locale
 object PrimDecoder {
   data class TextureFace(val uuid: String, val scaleS: Float, val scaleT: Float, val offsetS: Float, val offsetT: Float, val rotation: Float, val r: Float, val g: Float, val b: Float, val a: Float, val texGen: Int = 0)
-  data class Prim(val id: Long, var tipo: Int, var x: Double, var y: Double, var z: Double, var sx: Float, var sy: Float, var sz: Float, var yaw: Float, var seen: Long, var mat: Int = -1, var tex: String = "", var texScaleS: Float = 1f, var texScaleT: Float = 1f, var texOffsetS: Float = 0f, var texOffsetT: Float = 0f, var texRotation: Float = 0f, var texR: Float = 1f, var texG: Float = 1f, var texB: Float = 1f, var texA: Float = 1f, var texFaces: List<TextureFace> = emptyList(), var pathCurve: Int = 0x10, var profileCurve: Int = 0x01, var meshId: String = "", var hasShape: Boolean = false, var shPb: Float = 0f, var shPe: Float = 1f, var shPsx: Float = 1f, var shPsy: Float = 1f, var shShx: Float = 0f, var shShy: Float = 0f, var shTw: Float = 0f, var shTwb: Float = 0f, var shRo: Float = 0f, var shTpx: Float = 0f, var shTpy: Float = 0f, var shRev: Float = 0f, var shSk: Float = 0f, var shQb: Float = 0f, var shQe: Float = 1f, var shQh: Float = 0f, var parentId: Long = 0L)
+  data class Prim(val id: Long, var tipo: Int, var x: Double, var y: Double, var z: Double, var sx: Float, var sy: Float, var sz: Float, var yaw: Float, var seen: Long, var rotX: Float = 0f, var rotY: Float = 0f, var rotZ: Float = 0f, var rotW: Float = 1f, var mat: Int = -1, var tex: String = "", var texScaleS: Float = 1f, var texScaleT: Float = 1f, var texOffsetS: Float = 0f, var texOffsetT: Float = 0f, var texRotation: Float = 0f, var texR: Float = 1f, var texG: Float = 1f, var texB: Float = 1f, var texA: Float = 1f, var texFaces: List<TextureFace> = emptyList(), var pathCurve: Int = 0x10, var profileCurve: Int = 0x01, var meshId: String = "", var hasShape: Boolean = false, var shPb: Float = 0f, var shPe: Float = 1f, var shPsx: Float = 1f, var shPsy: Float = 1f, var shShx: Float = 0f, var shShy: Float = 0f, var shTw: Float = 0f, var shTwb: Float = 0f, var shRo: Float = 0f, var shTpx: Float = 0f, var shTpy: Float = 0f, var shRev: Float = 0f, var shSk: Float = 0f, var shQb: Float = 0f, var shQe: Float = 1f, var shQh: Float = 0f, var parentId: Long = 0L)
   var nTerse = 0L
   var nComp = 0L
   var nFull = 0L
@@ -255,62 +255,31 @@ object PrimDecoder {
   private fun u8f(v: Int, lo: Float, hi: Float): Float {
     return lo + (hi - lo) * ((v and 0xFF).toFloat() / 255f)
   }
-  private data class Movement(val x: Double, val y: Double, val z: Double, val yaw: Float)
+  private data class Movement(
+    val x: Double, val y: Double, val z: Double,
+    val qx: Float, val qy: Float, val qz: Float, val qw: Float
+  ) { val yaw: Float get() = yawQuat(qx,qy,qz,qw) }
 
   // ObjectData movement layouts are defined by the Second Life wire format:
   // 16 = U8Vec3/U8Rot, 32 = U16Vec3/U16Rot, 48 = 16-byte foot plane + 32,
   // 60 = 32-bit floats, 76 = 16-byte foot plane + 60.
   private fun decodeObjectMovement(blk: ByteArray, ilen: Int): Movement? {
     return try {
-      return when (ilen) {
-        16 -> {
-          val x = u8f(blk[0].toInt(), -256f, 256f).toDouble()
-          val y = u8f(blk[1].toInt(), -256f, 256f).toDouble()
-          val z = u8f(blk[2].toInt(), -256f, 256f).toDouble()
-          val qx = u8f(blk[9].toInt(), -1f, 1f)
-          val qy = u8f(blk[10].toInt(), -1f, 1f)
-          val qz = u8f(blk[11].toInt(), -1f, 1f)
-          val qw = u8f(blk[12].toInt(), -1f, 1f)
-          Movement(x, y, z, yawQuat(qx, qy, qz, qw))
-        }
-        32 -> {
-          val x = u16f(u16at(blk, 0), -128f, 384f).toDouble()
-          val y = u16f(u16at(blk, 2), -128f, 384f).toDouble()
-          val z = u16f(u16at(blk, 4), -256f, 768f).toDouble()
-          val qx = u16f(u16at(blk, 18), -1f, 1f)
-          val qy = u16f(u16at(blk, 20), -1f, 1f)
-          val qz = u16f(u16at(blk, 22), -1f, 1f)
-          val qw = u16f(u16at(blk, 24), -1f, 1f)
-          Movement(x, y, z, yawQuat(qx, qy, qz, qw))
-        }
-        48 -> {
-          val x = u16f(u16at(blk, 16), -128f, 384f).toDouble()
-          val y = u16f(u16at(blk, 18), -128f, 384f).toDouble()
-          val z = u16f(u16at(blk, 20), -256f, 768f).toDouble()
-          val qx = u16f(u16at(blk, 34), -1f, 1f)
-          val qy = u16f(u16at(blk, 36), -1f, 1f)
-          val qz = u16f(u16at(blk, 38), -1f, 1f)
-          val qw = u16f(u16at(blk, 40), -1f, 1f)
-          Movement(x, y, z, yawQuat(qx, qy, qz, qw))
-        }
-        60 -> {
-          val bb = ByteBuffer.wrap(blk).order(ByteOrder.LITTLE_ENDIAN)
-          Movement(bb.getFloat(0).toDouble(), bb.getFloat(4).toDouble(), bb.getFloat(8).toDouble(), yawVec(bb.getFloat(36), bb.getFloat(40), bb.getFloat(44)))
-        }
-        76, 140 -> {
-          val bb = ByteBuffer.wrap(blk).order(ByteOrder.LITTLE_ENDIAN)
-          Movement(bb.getFloat(16).toDouble(), bb.getFloat(20).toDouble(), bb.getFloat(24).toDouble(), yawVec(bb.getFloat(52), bb.getFloat(56), bb.getFloat(60)))
-        }
-        124 -> {
-          val bb = ByteBuffer.wrap(blk).order(ByteOrder.LITTLE_ENDIAN)
-          Movement(bb.getFloat(0).toDouble(), bb.getFloat(4).toDouble(), bb.getFloat(8).toDouble(), yawVec(bb.getFloat(36), bb.getFloat(40), bb.getFloat(44)))
-        }
-        else -> null
+      fun q8(i: Int)=u8f(blk[i].toInt(),-1f,1f)
+      fun q16(i: Int)=u16f(u16at(blk,i),-1f,1f)
+      fun qw3(x:Float,y:Float,z:Float)=kotlin.math.sqrt((1f-x*x-y*y-z*z).coerceAtLeast(0f))
+      when(ilen){
+        16->Movement(u8f(blk[0].toInt(),-256f,256f).toDouble(),u8f(blk[1].toInt(),-256f,256f).toDouble(),u8f(blk[2].toInt(),-256f,256f).toDouble(),q8(9),q8(10),q8(11),q8(12))
+        32->Movement(u16f(u16at(blk,0),-128f,384f).toDouble(),u16f(u16at(blk,2),-128f,384f).toDouble(),u16f(u16at(blk,4),-256f,768f).toDouble(),q16(18),q16(20),q16(22),q16(24))
+        48->Movement(u16f(u16at(blk,16),-128f,384f).toDouble(),u16f(u16at(blk,18),-128f,384f).toDouble(),u16f(u16at(blk,20),-256f,768f).toDouble(),q16(34),q16(36),q16(38),q16(40))
+        60,124->{val bb=ByteBuffer.wrap(blk).order(ByteOrder.LITTLE_ENDIAN);val qx=bb.getFloat(36);val qy=bb.getFloat(40);val qz=bb.getFloat(44);Movement(bb.getFloat(0).toDouble(),bb.getFloat(4).toDouble(),bb.getFloat(8).toDouble(),qx,qy,qz,qw3(qx,qy,qz))}
+        76,140->{val bb=ByteBuffer.wrap(blk).order(ByteOrder.LITTLE_ENDIAN);val qx=bb.getFloat(52);val qy=bb.getFloat(56);val qz=bb.getFloat(60);Movement(bb.getFloat(16).toDouble(),bb.getFloat(20).toDouble(),bb.getFloat(24).toDouble(),qx,qy,qz,qw3(qx,qy,qz))}
+        else->null
       }
-    } catch (_: Throwable) {
-      null
-    }
+    } catch(_ : Throwable){null}
   }
+
+
   private fun yawQuat(qx: Float, qy: Float, qz: Float, qw: Float): Float {
     return Math.atan2((2.0 * (qw * qz + qx * qy)).toDouble(), (1.0 - 2.0 * (qy * qy + qz * qz)).toDouble()).toFloat()
   }
@@ -644,50 +613,28 @@ object PrimDecoder {
     pendingTextures.remove(id)?.let { applyTextureLocked(r, it) }
     pendingMeshes.remove(id)?.let { r.meshId = it }
   }
-  private fun put(id: Long, tipo: Int, x: Double, y: Double, z: Double, sx: Float, sy: Float, sz: Float, yw: Float, now: Long, mat: Int = -1, tex: String = "", parentId: Long = -1L) {
-    try {
-      if (!x.isFinite() || !y.isFinite() || !z.isFinite()) {
-        try { lastPutReject = "no-finito id=" + id } catch(_: Throwable) {}
-        return
+  private fun put(
+    id: Long,tipo: Int,x: Double,y: Double,z: Double,
+    sx: Float,sy: Float,sz: Float,yw: Float,now: Long,
+    mat: Int=-1,tex: String="",parentId: Long=-1L,
+    rotX: Float=0f,rotY: Float=0f,rotZ: Float=0f,rotW: Float=1f
+  ){
+    try{synchronized(recs){
+      val old=recs[id]
+      val r=old?:Prim(id,tipo,x,y,z,normS(sx),normS(sy),normS(sz),if(yw.isFinite())yw else 0f,now)
+      if(old==null)recs[id]=r
+      r.tipo=tipo;r.x=x;r.y=y;r.z=z
+      if(sx.isFinite())r.sx=normS(sx);if(sy.isFinite())r.sy=normS(sy);if(sz.isFinite())r.sz=normS(sz)
+      if(yw.isFinite())r.yaw=yw
+      if(rotX.isFinite()&&rotY.isFinite()&&rotZ.isFinite()&&rotW.isFinite()){
+        val l=kotlin.math.sqrt(rotX*rotX+rotY*rotY+rotZ*rotZ+rotW*rotW).coerceAtLeast(1e-6f)
+        r.rotX=rotX/l;r.rotY=rotY/l;r.rotZ=rotZ/l;r.rotW=rotW/l
       }
-      if (tipo == -1 && x > -10.0 && x < 10.0 && y > -10.0 && y < 10.0 && z > -200.0 && z < 2000.0) {
-        try { nAttach++ } catch(_: Throwable) {}
-        try { censoAdd(censoAttach, id) } catch(_: Throwable) {}
-      }
-      if (x < -1024.0 || x > 1280.0 || y < -1024.0 || y > 1280.0 || z < -512.0 || z > 8192.0) {
-        try { nFueraRango++ } catch(_: Throwable) {}
-        try { lastPutReject = "absurdo id=" + id + " xyz=" + x + "," + y + "," + z } catch(_: Throwable) {}
-        return
-      }
-      if (sx.isFinite() && sy.isFinite() && sz.isFinite() && (sx <= 0f || sy <= 0f || sz <= 0f || sx > 256f || sy > 256f || sz > 256f)) {
-        try { nEscMala++ } catch(_: Throwable) {}
-        try { lastPutReject = "escala id=" + id + " s=" + sx + "," + sy + "," + sz } catch(_: Throwable) {}
-        return
-      }
-      synchronized(recs) {
-        val r = recs[id]
-        val target = if (r == null) {
-          val yy = if (yw.isFinite()) yw else 0f
-          Prim(id, tipo, x, y, z, normS(sx), normS(sy), normS(sz), yy, now, mat, tex, parentId = parentId.coerceAtLeast(0L)).also { recs[id] = it }
-        } else {
-          if (tipo != -1) r.tipo = tipo
-          if (mat != -1) r.mat = mat
-          if (tex.isNotEmpty()) r.tex = tex
-          r.x = x; r.y = y; r.z = z
-          if (sx.isFinite()) r.sx = normS(sx)
-          if (sy.isFinite()) r.sy = normS(sy)
-          if (sz.isFinite()) r.sz = normS(sz)
-          if (yw.isFinite()) r.yaw = yw
-          if (parentId >= 0L) r.parentId = parentId
-          r.seen = now
-          r
-        }
-        applyPendingLocked(id, target)
-      }
-      try { synchronized(recs) { deadIds.remove(id) } } catch(_: Throwable) {}
-      try { lastPutReject = "" } catch(_: Throwable) {}
-    } catch(_: Throwable) {}
+      r.seen=now;if(parentId>=0L)r.parentId=parentId;if(mat>=0)r.mat=mat;if(tex.isNotEmpty())r.tex=tex
+    }}catch(_:Throwable){}
   }
+
+
   private fun sample(now: Long): Prim? {
     try {
       synchronized(recs) {
@@ -956,7 +903,7 @@ object PrimDecoder {
           val x = bb.getFloat(40).toDouble()
           val y = bb.getFloat(44).toDouble()
           val z = bb.getFloat(48).toDouble()
-          val yaw = yawVec(bb.getFloat(52), bb.getFloat(56), bb.getFloat(60))
+          val qx=bb.getFloat(52); val qy=bb.getFloat(56); val qz=bb.getFloat(60); val qw=kotlin.math.sqrt((1f-qx*qx-qy*qy-qz*qz).coerceAtLeast(0f)); val yaw=yawQuat(qx,qy,qz,qw)
           val flags = bb.getInt(64)
           var i = 68
           // OwnerID is always present.
@@ -1013,7 +960,7 @@ object PrimDecoder {
               throw IndexOutOfBoundsException("textureEntry")
             }
           }
-          put(id, pcode, x, y, z, sx, sy, sz, yaw, now, mat, parentId = parentId)
+          put(id,pcode,x,y,z,sx,sy,sz,yaw,now,mat,parentId=parentId,rotX=qx,rotY=qy,rotZ=qz,rotW=qw)
           synchronized(recs) { recs[id]?.let { applyShapeLocked(it, shape) } }
           decodeTextureAndMesh(id, texRaw, extra)
           censoAdd(censoComp, id)
@@ -1074,7 +1021,7 @@ object PrimDecoder {
           if (mv == null) { try { nLenMalo++ } catch(_: Throwable) {}; o += ilen; continue }
           try { censoAdd(censoFull, id) } catch (_: Throwable) {}
           try { muIn = "p=" + mv.x + "," + mv.y + "," + mv.z + " " } catch(_: Throwable) {}
-          put(id, pcode, mv.x, mv.y, mv.z, sx, sy, sz, mv.yaw, now, hb[26].toInt() and 0xFF)
+          put(id,pcode,mv.x,mv.y,mv.z,sx,sy,sz,mv.yaw,now,hb[26].toInt() and 0xFF,rotX=mv.qx,rotY=mv.qy,rotZ=mv.qz,rotW=mv.qw)
           try { synchronized(recs) { if (reqMultDone.contains(id)) { nAnsweredReq++; answeredIds.add(id) } } } catch(_: Throwable) {}
         }
         o += ilen
