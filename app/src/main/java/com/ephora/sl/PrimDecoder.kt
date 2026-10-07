@@ -3,7 +3,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Locale
 object PrimDecoder {
-  data class TextureFace(val uuid: String, val scaleS: Float, val scaleT: Float, val offsetS: Float, val offsetT: Float, val rotation: Float, val r: Float, val g: Float, val b: Float, val a: Float)
+  data class TextureFace(val uuid: String, val scaleS: Float, val scaleT: Float, val offsetS: Float, val offsetT: Float, val rotation: Float, val r: Float, val g: Float, val b: Float, val a: Float, val texGen: Int = 0)
   data class Prim(val id: Long, var tipo: Int, var x: Double, var y: Double, var z: Double, var sx: Float, var sy: Float, var sz: Float, var yaw: Float, var seen: Long, var mat: Int = -1, var tex: String = "", var texScaleS: Float = 1f, var texScaleT: Float = 1f, var texOffsetS: Float = 0f, var texOffsetT: Float = 0f, var texRotation: Float = 0f, var texR: Float = 1f, var texG: Float = 1f, var texB: Float = 1f, var texA: Float = 1f, var texFaces: List<TextureFace> = emptyList(), var pathCurve: Int = 0x10, var profileCurve: Int = 0x01, var meshId: String = "", var hasShape: Boolean = false, var shPb: Float = 0f, var shPe: Float = 1f, var shPsx: Float = 1f, var shPsy: Float = 1f, var shShx: Float = 0f, var shShy: Float = 0f, var shTw: Float = 0f, var shTwb: Float = 0f, var shRo: Float = 0f, var shTpx: Float = 0f, var shTpy: Float = 0f, var shRev: Float = 0f, var shSk: Float = 0f, var shQb: Float = 0f, var shQe: Float = 1f, var shQh: Float = 0f, var parentId: Long = 0L)
   var nTerse = 0L
   var nComp = 0L
@@ -387,6 +387,9 @@ object PrimDecoder {
       val offsetsS = field(2) ?: return null
       val offsetsT = field(2) ?: return null
       val rotations = field(2) ?: return null
+      // TexGen is stored in the low three bits of the MediaFlags byte.
+      // 0=default, 2=planar, 4=spherical, 6=cylindrical.
+      val media = if (o < raw.size) field(1) else null
       fun makeFace(i: Int): TextureFace {
         val idHex = hexPrev(ids[i], 16).lowercase(Locale.US)
         val uuid = idHex.substring(0,8)+"-"+idHex.substring(8,12)+"-"+idHex.substring(12,16)+"-"+idHex.substring(16,20)+"-"+idHex.substring(20,32)
@@ -396,9 +399,10 @@ object PrimDecoder {
         val to = ByteBuffer.wrap(offsetsT[i]).order(ByteOrder.LITTLE_ENDIAN).short.toInt()
         val ro = u16at(rotations[i], 0)
         val c = colors[i]
+        val mg = media?.get(i)?.getOrNull(0)?.toInt()?.and(0x06) ?: 0
         return TextureFace(uuid, sc, tc, so / 32767f, to / 32767f, (ro / 32768f) * (Math.PI * 2.0).toFloat(),
           (255 - (c[0].toInt() and 255)) / 255f, (255 - (c[1].toInt() and 255)) / 255f,
-          (255 - (c[2].toInt() and 255)) / 255f, (255 - (c[3].toInt() and 255)) / 255f)
+          (255 - (c[2].toInt() and 255)) / 255f, (255 - (c[3].toInt() and 255)) / 255f, mg)
       }
       return TextureEntryFields((0 until 32).map(::makeFace))
     } catch (_: Throwable) { return null }

@@ -36,6 +36,8 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var uvLoc = -1
   private var uvTransformLoc = -1
   private var uvRotationLoc = -1
+  private var texGenLoc = -1
+  private var objectScaleLoc = -1
   private var samplerLoc = -1
   private var useTextureLoc = -1
   private var terrainModeLoc = -1
@@ -243,6 +245,8 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       colorLoc = GLES20.glGetUniformLocation(program, "uColor")
       uvTransformLoc = GLES20.glGetUniformLocation(program, "uUvTransform")
       uvRotationLoc = GLES20.glGetUniformLocation(program, "uUvRotation")
+      texGenLoc = GLES20.glGetUniformLocation(program, "uTexGen")
+      objectScaleLoc = GLES20.glGetUniformLocation(program, "uObjectScale")
       samplerLoc = GLES20.glGetUniformLocation(program, "uTexture")
       useTextureLoc = GLES20.glGetUniformLocation(program, "uUseTexture")
       terrainModeLoc = GLES20.glGetUniformLocation(program, "uTerrainMode")
@@ -386,7 +390,8 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
             val tint = if (tf != null) floatArrayOf(tf.r, tf.g, tf.b, tf.a) else color
             drawMesh(face.vertices, face.vertexCount, x, y, z, sx, sy, sz, o.yaw, tint, tex,
               tf?.scaleS ?: o.texScaleS, tf?.scaleT ?: o.texScaleT,
-              tf?.offsetS ?: o.texOffsetS, tf?.offsetT ?: o.texOffsetT, tf?.rotation ?: o.texRotation)
+              tf?.offsetS ?: o.texOffsetS, tf?.offsetT ?: o.texOffsetT, tf?.rotation ?: o.texRotation,
+              tf?.texGen ?: 0)
           }
         } else if (o.meshId.isEmpty() && shaped != null) {
           val face0 = o.texFaces.firstOrNull()
@@ -431,18 +436,22 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var lastStats = 0L
 
   private fun drawMesh(buffer: FloatBuffer?, vertexCount: Int, x: Double, y: Double, z: Double, sx: Float, sy: Float, sz: Float, yaw: Float, color: FloatArray,
-                       textureUuid: String = "", scaleS: Float = 1f, scaleT: Float = 1f, offsetS: Float = 0f, offsetT: Float = 0f, rotation: Float = 0f, firstVertex: Int = 0) {
+                       textureUuid: String = "", scaleS: Float = 1f, scaleT: Float = 1f, offsetS: Float = 0f, offsetT: Float = 0f, rotation: Float = 0f, texGen: Int = 0, firstVertex: Int = 0) {
     val b = buffer ?: return
     Matrix.setIdentityM(model, 0)
     Matrix.translateM(model, 0, x.toFloat(), y.toFloat(), z.toFloat())
     Matrix.rotateM(model, 0, Math.toDegrees(yaw.toDouble()).toFloat(), 0f, 1f, 0f)
-    Matrix.scaleM(model, 0, sx, sy, sz)
+    // Prim scale is stored in Second Life coordinates X/Y/Z. The renderer
+    // uses X/Z/-Y, so its scale order is X, Z, Y.
+    Matrix.scaleM(model, 0, sx, sz, sy)
     Matrix.multiplyMM(mvp, 0, vp, 0, model, 0)
     GLES20.glUniformMatrix4fv(mvpLoc, 1, false, mvp, 0)
     GLES20.glUniform4fv(colorLoc, 1, color, 0)
     GLES20.glUniform1i(terrainModeLoc, 0)
     GLES20.glUniform4f(uvTransformLoc, scaleS, scaleT, offsetS, offsetT)
     GLES20.glUniform1f(uvRotationLoc, rotation)
+    GLES20.glUniform1i(texGenLoc, texGen)
+    GLES20.glUniform3f(objectScaleLoc, sx, sy, sz)
     val texId = if (textureUuid.isNotEmpty()) textureFor(textureUuid) else 0
     if (texId != 0) texturedObjects++
     GLES20.glUniform1i(useTextureLoc, if (texId != 0) 1 else 0)
@@ -685,16 +694,35 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     private const val MAX_OBJECTS = 2048
     private const val NULL_TEXTURE_UUID = "00000000-0000-0000-0000-000000000000"
     private const val VERTEX = """
-      attribute vec3 aPosition; attribute vec3 aNormal; attribute vec2 aUv; uniform mat4 uMvp; varying vec3 vNormal; varying vec2 vUv; varying vec3 vTerrainPos;
-      void main(){ gl_Position=uMvp*vec4(aPosition,1.0); vNormal=aNormal; vUv=vec2(aUv.x,1.0-aUv.y); vTerrainPos=aPosition; }
+      attribute vec3 aPosition; attribute vec3 aNormal; attribute vec2 aUv; uniform mat4 uMvp; varying vec3 vNormal; varying vec2 vUv; varying vec3 vTerrainPos; varying vec3 vLocalPos;
+      void main(){ gl_Position=uMvp*vec4(aPosition,1.0); vNormal=aNormal; vUv=vec2(aUv.x,1.0-aUv.y); vTerrainPos=aPosition; vLocalPos=aPosition; }
     """
     private const val FRAGMENT = """
       precision mediump float;
-      uniform vec4 uColor; uniform vec4 uUvTransform; uniform float uUvRotation;
+      uniform vec4 uColor; uniform vec4 uUvTransform; uniform float uUvRotation; uniform int uTexGen; uniform vec3 uObjectScale;
       uniform sampler2D uTexture; uniform int uUseTexture; uniform int uTerrainMode;
       uniform sampler2D uTerrain0; uniform sampler2D uTerrain1; uniform sampler2D uTerrain2; uniform sampler2D uTerrain3;
       uniform vec4 uTerrainStart; uniform vec4 uTerrainRange;
-      varying vec3 vNormal; varying vec2 vUv; varying vec3 vTerrainPos;
+      varying vec3 vNormal; varying vec2 vUv; varying vec3 vTerrainPos; varying vec3 vLocalPos;
+      vec2 slPlanar(vec3 p, vec3 n){
+        float d=n.x;
+        vec3 b;
+        if(abs(d)>=0.5) b=vec3(0.0,d<0.0?-1.0:1.0,0.0);
+        else b=vec3(n.y>0.0?-1.0:1.0,0.0,0.0);
+        vec3 t=normalize(cross(b,n));
+        return vec2(1.0+(dot(b,p)*2.0-0.5), -(dot(t,p)*2.0-0.5));
+      }
+      vec2 slCylindrical(vec3 p){
+        float u=atan(p.y,p.x)/(6.28318530718)+0.5;
+        float v=p.z+0.5;
+        return vec2(u,v);
+      }
+      vec2 slSpherical(vec3 p){
+        float r=max(length(p),0.0001);
+        float u=atan(p.y,p.x)/(6.28318530718)+0.5;
+        float v=asin(clamp(p.z/r,-1.0,1.0))/3.14159265359+0.5;
+        return vec2(u,v);
+      }
       void main(){
         vec3 n=normalize(vNormal);
         float l=0.38+0.62*max(dot(n,normalize(vec3(-0.35,0.88,0.28))),0.0);
@@ -712,7 +740,19 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
           else base=mix(t2,t3,layer-2.0);
           base*=uColor;
         } else {
-          vec2 p=(vUv-vec2(0.5))*uUvTransform.xy;
+          // Convert renderer-local coordinates back to scaled Second Life volume
+          // coordinates before applying non-default texgen.
+          vec3 slPos=vec3(vLocalPos.x*uObjectScale.x,
+                          -vLocalPos.z*uObjectScale.y,
+                          vLocalPos.y*uObjectScale.z);
+          vec3 slNormal=normalize(vec3(vNormal.x/max(uObjectScale.x,0.001),
+                                        -vNormal.z/max(uObjectScale.y,0.001),
+                                        vNormal.y/max(uObjectScale.z,0.001)));
+          vec2 baseUv=vUv;
+          if(uTexGen==2) baseUv=slPlanar(slPos,slNormal);
+          else if(uTexGen==4) baseUv=slSpherical(slPos);
+          else if(uTexGen==6) baseUv=slCylindrical(slPos);
+          vec2 p=(baseUv-vec2(0.5))*uUvTransform.xy;
           float c=cos(uUvRotation); float s=sin(uUvRotation);
           p=mat2(c,s,-s,c)*p+vec2(0.5)+uUvTransform.zw;
           base=uUseTexture==1?texture2D(uTexture,p)*uColor:uColor;
