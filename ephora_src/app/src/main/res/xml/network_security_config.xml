@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SL sirve assets por http (asset-cdn): cleartext solo para dominios LL, resto hereda (https). -->
+<network-security-config>
+  <domain-config cleartextTrafficPermitted="true">
+    <domain includeSubdomains="false">asset-cdn.glb.agni.lindenlab.com</domain>
+    <domain includeSubdomains="true">agni.lindenlab.com</domain>
+  </domain-config>
+</network-security-config>

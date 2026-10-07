@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Ephora" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#0B1020</item>
+        <item name="android:textColorPrimary">#E8EDF7</item>
+        <item name="android:colorAccent">#22D3EE</item>
+        <item name="android:editTextColor">#E8EDF7</item>
+    </style>
+</resources>
