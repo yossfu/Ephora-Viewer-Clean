@@ -751,6 +751,35 @@ object PrimDecoder {
       ShapeData(fPathCurve, fProfileCurve, fPb, fPe, fPsx, fPsy, fShx, fShy, fTw, fTwb, fRo, fTpx, fTpy, fRev, fSk, fQb, fQe, fQh)
     } catch (_: Throwable) { null }
   }
+  /**
+   * Read the variable ExtraParams field exactly as defined by
+   * Primitive.SetExtraParamsFromBytes(): count U8, then type U16 + length U32
+   * + payload for each parameter. Returns the raw field and bytes consumed.
+   */
+  private fun readExtraParams(p: ByteArray, start: Int): Pair<ByteArray, Int>? {
+    try {
+      if (start < 0 || start >= p.size) return null
+      var o = start
+      val count = p[o].toInt() and 0xFF
+      o++
+      if (count > 32) return null
+      repeat(count) {
+        if (o + 6 > p.size) return null
+        o += 2 // ExtraParamType
+        val len = ((p[o].toInt() and 255) or
+          ((p[o + 1].toInt() and 255) shl 8) or
+          ((p[o + 2].toInt() and 255) shl 16) or
+          ((p[o + 3].toInt() and 255) shl 24))
+        o += 4
+        if (len < 0 || o + len > p.size) return null
+        o += len
+      }
+      return p.copyOfRange(start, o) to (o - start)
+    } catch (_: Throwable) {
+      return null
+    }
+  }
+
   private fun decodeTextureAndMesh(id: Long, texRaw: ByteArray, extraRaw: ByteArray) {
     try {
       val te = parseTextureEntry(texRaw)
@@ -936,13 +965,13 @@ object PrimDecoder {
             i = readCstr(blk, i) ?: throw IndexOutOfBoundsException("media")
           }
           if ((flags and 0x08) != 0) i += 86 // ParticleSystem fixed payload in the legacy compressed wire format
-          if (i >= blk.size) throw IndexOutOfBoundsException("extra-len")
-          val extraLen = blk[i].toInt() and 255
-          i += 1
-          if (i + extraLen > blk.size) throw IndexOutOfBoundsException("extra")
-          val extra = blk.copyOfRange(i, i + extraLen)
-          i += extraLen
-          if ((flags and 0x10) != 0) i += 25 // UUID16 + gainF32 + flagsU8 + radiusF32
+          val extraRead = readExtraParams(blk, i) ?: throw IndexOutOfBoundsException("extraParams")
+          val extra = extraRead.first
+          i += extraRead.second
+          if ((flags and 0x10) != 0) {
+            if (i + 25 > blk.size) throw IndexOutOfBoundsException("sound")
+            i += 25 // UUID16 + gainF32 + flagsU8 + radiusF32
+          }
           if ((flags and 0x100) != 0) i = readCstr(blk, i) ?: throw IndexOutOfBoundsException("namevalues")
           if (i + 23 > blk.size) throw IndexOutOfBoundsException("shape23")
           val shape = parseShape23(blk, i) ?: throw IndexOutOfBoundsException("shape")
@@ -1078,6 +1107,10 @@ object PrimDecoder {
           }
         } catch(_: Throwable) {}
         if (o + 66 > p.size) { try { stashFullMu("fix66", muId, muIlen, muPc, muIn, wA.size, wC.size, wD.size) } catch(_: Throwable) {}; break }
+        // Validate the complete ExtraParams structure before inspecting mesh/sculpt.
+        if (wExtra.isNotEmpty() && readExtraParams(wExtra, 0) == null) {
+          throw IndexOutOfBoundsException("full-extraParams")
+        }
         val meshId = meshIdFromExtraParams(wExtra)
         try {
           if (wExtra.isNotEmpty()) meshExtraBlocks++
