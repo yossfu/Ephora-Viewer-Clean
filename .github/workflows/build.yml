@@ -2,7 +2,7 @@ name: EPHORASL Android APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, ephora-7.74-real-sl-final]
   workflow_dispatch:
 
 permissions:
