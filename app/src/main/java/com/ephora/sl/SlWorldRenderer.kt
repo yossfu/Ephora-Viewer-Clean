@@ -346,7 +346,18 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       val cux = cry * caz - crz * cay
       val cuy = crz * cax - crx * caz
       val cuz = crx * cay - cry * cax
-      try { AgentLoop.camVec = floatArrayOf(slEx.toFloat(), slEy.toFloat(), slEz.toFloat(), cax.toFloat(), cay.toFloat(), caz.toFloat(), (-crx).toFloat(), (-cry).toFloat(), (-crz).toFloat(), cux.toFloat(), cuy.toFloat(), cuz.toFloat()); AgentLoop.cameraYaw = orbitYaw.toFloat() } catch(_: Throwable) {}
+      try {
+        AgentLoop.camVec = floatArrayOf(
+          slEx.toFloat(), slEy.toFloat(), slEz.toFloat(),
+          cax.toFloat(), cay.toFloat(), caz.toFloat(),
+          (-crx).toFloat(), (-cry).toFloat(), (-crz).toFloat(),
+          cux.toFloat(), cuy.toFloat(), cuz.toFloat()
+        )
+        // Orbit yaw is the angle of the CAMERA POSITION around the avatar.
+        // Movement forward must follow the CAMERA VIEW direction, which is 180°
+        // opposite that orbit vector in third-person mode.
+        AgentLoop.cameraYaw = (orbitYaw + Math.PI).toFloat()
+      } catch(_: Throwable) {}
       Matrix.multiplyMM(vp, 0, projection, 0, camera, 0)
       drawCount = 0
       PrimShapes.budget = 1000
@@ -359,15 +370,24 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       val avatarObject = nearestAvatar(objects)
       if (avatarObject != null) drawRealAvatar(avatarObject)
       val n = objects.size.coerceAtMost(MAX_OBJECTS)
-      val renderRadius = 512.0
+      // Keep rendering bounded by the same progressive interest distance sent to
+      // the simulator. This prevents the mobile GPU from processing distant work
+      // that is not supposed to be fully streamed yet.
+      val renderRadius = minOf(WorldRenderConfig.VISUAL_RADIUS_METERS, WorldRenderConfig.serverFarMeters.toDouble())
       val renderRadius2 = renderRadius * renderRadius
       val objMap=HashMap<Long,PrimDecoder.Prim>(objects.size)
       for(o in objects)objMap[o.id]=o
       val visibleMeshIds=ArrayList<String>()
       for(i in 0 until n){
-        val o=objects[i]; val pose=poseOf(o,objMap); val x=pose.x-128.0; val z=-(pose.y-128.0)
-        val dx=x-eyeX; val dz=z-eyeZ
-        if(o.tipo!=47&&o.meshId.isNotEmpty()&&dx*dx+dz*dz<=renderRadius2)visibleMeshIds.add(o.meshId)
+        val o=objects[i]
+        val pose=poseOf(o,objMap)
+        val x=pose.x-128.0
+        val z=-(pose.y-128.0)
+        val dx=x-eyeX
+        val dz=z-eyeZ
+        if(o.tipo!=47&&o.meshId.isNotEmpty()&&dx*dx+dz*dz<=renderRadius2) {
+          visibleMeshIds.add(o.meshId)
+        }
       }
       MeshAssets.updateVisibleMeshes(visibleMeshIds)
       frPub = n
@@ -815,7 +835,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     private const val DRAW_WATER_SURFACE = false
     private const val TERRAIN_RES = 129
     private const val TERRAIN_STEP = 2
-    private const val MAX_OBJECTS = 2048
+    private const val MAX_OBJECTS = WorldRenderConfig.OBJECT_PUBLISH_BUDGET
     private const val NULL_TEXTURE_UUID = "00000000-0000-0000-0000-000000000000"
     private const val VERTEX = """
       attribute vec3 aPosition; attribute vec3 aNormal; attribute vec2 aUv; uniform mat4 uMvp; varying vec3 vNormal; varying vec2 vUv; varying vec3 vTerrainPos; varying vec3 vLocalPos;
