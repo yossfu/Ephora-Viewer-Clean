@@ -740,6 +740,18 @@ object AgentLoop {
           val dt = ((now - last).coerceIn(1L, 500L)) / 1000.0
           last = now
           val f = joystickFlags() or controlFlags
+          val buttonX = when {
+            (f and 8) != 0 && (f and 4) == 0 -> 1f
+            (f and 4) != 0 && (f and 8) == 0 -> -1f
+            else -> 0f
+          }
+          val buttonY = when {
+            (f and 1) != 0 && (f and 2) == 0 -> -1f
+            (f and 2) != 0 && (f and 1) == 0 -> 1f
+            else -> 0f
+          }
+          val moveX = if (kotlin.math.abs(joystickX) > 0.01f || kotlin.math.abs(joystickY) > 0.01f) joystickX else buttonX
+          val moveY = if (kotlin.math.abs(joystickX) > 0.01f || kotlin.math.abs(joystickY) > 0.01f) joystickY else buttonY
           if (now - lastAuSend >= 100L) {
             lastAuSend = now
           try {
@@ -754,11 +766,11 @@ object AgentLoop {
           }
           if (f != 0) {
             if (!movOn) { movOn = true; movFlags = f; sx = px; sy = py; sz = pz }
-            val mag = kotlin.math.sqrt((joystickX*joystickX + joystickY*joystickY).toDouble()).coerceAtMost(1.0)
+            val mag = kotlin.math.sqrt((moveX*moveX + moveY*moveY).toDouble()).coerceAtMost(1.0)
             if (mag > 0.05) {
               val speed = 3.2 * (if (mag > 0.82) 1.35 else 1.0) * dt
-              val forward = -joystickY.toDouble()
-              val strafe = joystickX.toDouble()
+              val forward = -moveY.toDouble()
+              val strafe = moveX.toDouble()
               val cy = kotlin.math.cos(cameraYaw.toDouble())
               val sy = kotlin.math.sin(cameraYaw.toDouble())
               px += (cy*forward - sy*strafe) * speed
