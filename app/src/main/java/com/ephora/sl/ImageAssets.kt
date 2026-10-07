@@ -22,9 +22,11 @@ import kotlinx.coroutines.launch
 object ImageAssets {
   private const val J2C_IMAGE_CODEC = 2
   private const val MAX_COMPRESSED = 16 * 1024 * 1024
-  private const val MAX_BITMAPS = 192
-  private const val MAX_RAW_BYTES = 32L * 1024L * 1024L
-  private const val MAX_PENDING = 16
+  private const val MAX_BITMAPS = 160
+  private const val MAX_BITMAP_BYTES = 48L * 1024L * 1024L
+  private const val MAX_BITMAP_DIMENSION = 2048
+  private const val MAX_RAW_BYTES = 24L * 1024L * 1024L
+  private const val MAX_PENDING = 32
   private const val UDP_STALL_MS = 12_000L
   private const val UDP_RETRY_MS = 8_000L
 
@@ -47,15 +49,8 @@ object ImageAssets {
   }
 
   private val pending = LinkedHashMap<String, Pending>()
-  private val bitmaps = object : LinkedHashMap<String, Bitmap>(128, 0.75f, true) {
-    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Bitmap>): Boolean {
-      if (size > MAX_BITMAPS) {
-        try { eldest.value.recycle() } catch (_: Throwable) {}
-        return true
-      }
-      return false
-    }
-  }
+  private val bitmaps = LinkedHashMap<String, Bitmap>(96, 0.75f, true)
+  private var bitmapBytes = 0L
   private val raw = object : LinkedHashMap<String, ByteArray>(64, 0.75f, true) {}
   private var rawBytes = 0L
   private val decoding = HashSet<String>()
@@ -83,6 +78,7 @@ object ImageAssets {
       try { bitmap.recycle() } catch (_: Throwable) {}
     }
     bitmaps.clear()
+    bitmapBytes = 0L
     packetCount = 0L
     completeCount = 0L
     decodedCount = 0L
@@ -178,6 +174,61 @@ object ImageAssets {
    * that this response really decoded before it abandons the next capability.
    * UDP ingestion remains asynchronous through decode().
    */
+  private fun bitmapBytesOf(bitmap: Bitmap): Long = try { bitmap.allocationByteCount.toLong() } catch (_: Throwable) { bitmap.width.toLong() * bitmap.height.toLong() * 4L }
+
+  @Synchronized private fun putBitmapLocked(uuid: String, bitmap: Bitmap) {
+    val old = bitmaps.remove(uuid)
+    if (old != null) { bitmapBytes -= bitmapBytesOf(old); try { old.recycle() } catch (_: Throwable) {} }
+    bitmaps[uuid] = bitmap
+    bitmapBytes += bitmapBytesOf(bitmap)
+    while ((bitmaps.size > MAX_BITMAPS || bitmapBytes > MAX_BITMAP_BYTES) && bitmaps.isNotEmpty()) {
+      val it = bitmaps.entries.iterator()
+      val e = it.next()
+      if (e.key == uuid && bitmaps.size == 1) break
+      it.remove()
+      bitmapBytes -= bitmapBytesOf(e.value)
+      try { e.value.recycle() } catch (_: Throwable) {}
+    }
+  }
+
+  private fun decodeStandard(data: ByteArray): Bitmap? {
+    return try {
+      val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+      BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
+      var sample = 1
+      while (maxOf(bounds.outWidth, bounds.outHeight) / sample > MAX_BITMAP_DIMENSION) sample = sample shl 1
+      val opts = BitmapFactory.Options().apply { inSampleSize = sample; inPreferredConfig = Bitmap.Config.ARGB_8888 }
+      BitmapFactory.decodeByteArray(data, 0, data.size, opts)
+    } catch (_: Throwable) { null }
+  }
+
+  private fun rgbaToBitmap(pixels: ByteArray): Bitmap? {
+    if (pixels.size < 8) return null
+    val bb = ByteBuffer.wrap(pixels).order(ByteOrder.LITTLE_ENDIAN)
+    val width = bb.int
+    val height = bb.int
+    if (width < 1 || height < 1 || width > 4096 || height > 4096) return null
+    val needed = 8L + width.toLong() * height.toLong() * 4L
+    if (needed > pixels.size.toLong()) return null
+    val outW = minOf(width, MAX_BITMAP_DIMENSION)
+    val outH = minOf(height, MAX_BITMAP_DIMENSION)
+    val argb = IntArray(outW * outH)
+    val srcBase = 8
+    for (dy in 0 until outH) {
+      val sy = dy * height / outH
+      for (dx in 0 until outW) {
+        val sx = dx * width / outW
+        val o = srcBase + (sy * width + sx) * 4
+        val r = pixels[o].toInt() and 255
+        val g = pixels[o + 1].toInt() and 255
+        val b = pixels[o + 2].toInt() and 255
+        val a = pixels[o + 3].toInt() and 255
+        argb[dy * outW + dx] = (a shl 24) or (r shl 16) or (g shl 8) or b
+      }
+    }
+    return Bitmap.createBitmap(argb, outW, outH, Bitmap.Config.ARGB_8888)
+  }
+
   fun acceptHttpTexture(uuid: String, contentType: String, data: ByteArray): Boolean {
     val key = uuid.lowercase()
     if (data.isEmpty() || data.size > MAX_COMPRESSED) return false
@@ -196,7 +247,7 @@ object ImageAssets {
     val bitmap = if (looksJ2k) {
       decodeToBitmapSync(key, data)
     } else {
-      try { BitmapFactory.decodeByteArray(data, 0, data.size) } catch (_: Throwable) { null }
+      decodeStandard(data)
     }
 
     if (bitmap == null) {
@@ -205,14 +256,12 @@ object ImageAssets {
     }
 
     synchronized(this) {
-      if (bitmaps.containsKey(key)) {
-        try { bitmap.recycle() } catch (_: Throwable) {}
-        return true
-      }
-      bitmaps[key] = bitmap
+      if (bitmaps.containsKey(key)) { try { bitmap.recycle() } catch (_: Throwable) {}; return true }
+      putBitmapLocked(key, bitmap)
       httpCompleteCount++
       decodedCount++
       lastResult = "ok:" + key + ":" + bitmap.width + "x" + bitmap.height + ":http"
+      raw.remove(key)?.let { rawBytes -= it.size.toLong() }
     }
     try {
       AgentLoop.onTick?.invoke(
@@ -227,26 +276,8 @@ object ImageAssets {
   private fun decodeToBitmapSync(uuid: String, compressed: ByteArray): Bitmap? {
     return try {
       val pixels = J2kDecoder.decodeNative(compressed) ?: return null
-      if (pixels.size < 8) return null
-      val bb = ByteBuffer.wrap(pixels).order(ByteOrder.LITTLE_ENDIAN)
-      val width = bb.int
-      val height = bb.int
-      if (width < 1 || height < 1 || width > 4096 || height > 4096) return null
-      val needed = 8L + width.toLong() * height.toLong() * 4L
-      if (needed > pixels.size.toLong()) return null
-      val argb = IntArray(width * height)
-      var o = 8
-      for (i in argb.indices) {
-        val r = pixels[o++].toInt() and 255
-        val g = pixels[o++].toInt() and 255
-        val b = pixels[o++].toInt() and 255
-        val a = pixels[o++].toInt() and 255
-        argb[i] = (a shl 24) or (r shl 16) or (g shl 8) or b
-      }
-      Bitmap.createBitmap(argb, width, height, Bitmap.Config.ARGB_8888)
-    } catch (_: Throwable) {
-      null
-    }
+      rgbaToBitmap(pixels)
+    } catch (_: Throwable) { null }
   }
 
   fun acceptHttpJ2c(uuid: String, data: ByteArray): Boolean =
@@ -261,29 +292,15 @@ object ImageAssets {
         if (codec != J2C_IMAGE_CODEC) throw IllegalArgumentException("codec=" + codec)
         val pixels = J2kDecoder.decodeNative(compressed) ?: throw IllegalStateException("OpenJPEG-rechazo-J2C")
         if (pixels.size < 8) throw IllegalStateException("salida-corta")
-        val bb = ByteBuffer.wrap(pixels).order(ByteOrder.LITTLE_ENDIAN)
-        val width = bb.int
-        val height = bb.int
-        if (width < 1 || height < 1 || width > 4096 || height > 4096) throw IllegalStateException("dimensiones=" + width + "x" + height)
-        val needed = 8L + width.toLong() * height.toLong() * 4L
-        if (needed > pixels.size.toLong()) throw IllegalStateException("rgba-corta=" + pixels.size)
-        val argb = IntArray(width * height)
-        var offset = 8
-        for (i in argb.indices) {
-          val r = pixels[offset++].toInt() and 255
-          val g = pixels[offset++].toInt() and 255
-          val b = pixels[offset++].toInt() and 255
-          val a = pixels[offset++].toInt() and 255
-          argb[i] = (a shl 24) or (r shl 16) or (g shl 8) or b
-        }
-        val bitmap = Bitmap.createBitmap(argb, width, height, Bitmap.Config.ARGB_8888)
+        val bitmap = rgbaToBitmap(pixels) ?: throw IllegalStateException("rgba-invalido")
         synchronized(this@ImageAssets) {
-          bitmaps[uuid] = bitmap
+          putBitmapLocked(uuid, bitmap)
           decodedCount++
+          raw.remove(uuid)?.let { rawBytes -= it.size.toLong() }
           decoding.remove(uuid)
-          lastResult = "ok:" + uuid + ":" + width + "x" + height
+          lastResult = "ok:" + uuid + ":" + bitmap.width + "x" + bitmap.height
         }
-        try { AgentLoop.onTick?.invoke("TEX-J2K-OK id8=" + uuid.take(8) + " size=" + width + "x" + height) } catch (_: Throwable) {}
+        try { AgentLoop.onTick?.invoke("TEX-J2K-OK id8=" + uuid.take(8) + " size=" + bitmap.width + "x" + bitmap.height) } catch (_: Throwable) {}
       } catch (e: Throwable) {
         synchronized(this@ImageAssets) {
           failedCount++
@@ -349,7 +366,9 @@ object ImageAssets {
     return if (keys.isEmpty()) "-" else keys.joinToString(",")
   }
 
-  @Synchronized fun touchIds(ids: List<String>) {}
+  @Synchronized fun touchIds(ids: List<String>) {
+    for (id in ids) bitmaps[id.lowercase()]
+  }
 
   @Synchronized fun status(): String {
     return "TEX-ASSETS packets=" + packetCount +
@@ -358,6 +377,7 @@ object ImageAssets {
       " failed=" + failedCount +
       " httpComplete=" + httpCompleteCount +
       " cache=" + bitmaps.size +
+      " cacheMB=" + "%.1f".format(bitmapBytes.toDouble() / 1048576.0) +
       " raw=" + raw.size +
       " rawMB=" + "%.1f".format(rawBytes.toDouble() / 1048576.0) +
       " pending=" + pending.size +
