@@ -531,13 +531,22 @@ object AgentLoop {
       val err = Math.sqrt(ex * ex + ey * ey + ez * ez)
       if (!err.isFinite()) return
 
-      // CoarseLocationUpdate is deliberately low precision. Do not snap the
-      // rendered/camera position for ordinary network latency; only large
-      // discontinuities are treated as a teleport/correction.
+      // CoarseLocationUpdate is deliberately low precision. Never snap the
+      // rendered/camera position while the user is actively walking: a coarse
+      // correction arriving late is exactly the rubber-band/latigazo symptom.
       if (err > 8.0) {
-        px = serverPx
-        py = serverPy
-        pz = serverPz
+        if (hasActiveMovement(lastMovementFlags)) {
+          val pull = (1.0 - Math.exp(-0.55 * dt)).coerceIn(0.0, 0.08)
+          px += ex * pull
+          py += ey * pull
+          pz += ez * pull
+        } else {
+          // When stationary, a large discrepancy is a real server correction
+          // (teleport/collision/region transition), so snap once and recover.
+          px = serverPx
+          py = serverPy
+          pz = serverPz
+        }
         return
       }
 
