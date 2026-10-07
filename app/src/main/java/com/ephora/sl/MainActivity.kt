@@ -596,6 +596,7 @@ class MainActivity : ComponentActivity() {
           val r = renderer3d ?: SlWorldRenderer(this@MainActivity)
           r3d = r
           r.onStats = { line -> try { udpLog(line) } catch(_: Throwable) {} }
+          try { r.joystickView=findViewById(R.id.joystick3d) } catch(_:Throwable) {}
           view3d.visibility = View.VISIBLE
           if (forceW > 1 && forceH > 1) { try { r.applyMetrics(forceW, forceH) } catch(_: Throwable) {} }
           if (!r.start(surface3d, forceW, forceH)) throw RuntimeException("3d-init")
