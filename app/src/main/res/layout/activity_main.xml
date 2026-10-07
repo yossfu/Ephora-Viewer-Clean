@@ -416,6 +416,27 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent" />
 
+            <com.ephora.sl.VirtualJoystickView
+                android:id="@+id/joystick3d"
+                android:layout_width="180dp"
+                android:layout_height="180dp"
+                android:layout_gravity="bottom|start"
+                android:layout_marginStart="14dp"
+                android:layout_marginBottom="14dp"
+                android:elevation="24dp" />
+
+            <Button
+                android:id="@+id/btn3dCam"
+                android:layout_width="54dp"
+                android:layout_height="54dp"
+                android:layout_gravity="top|end"
+                android:layout_margin="12dp"
+                android:text="↻"
+                android:textSize="22sp"
+                android:textColor="#22D3EE"
+                android:elevation="24dp"
+                android:background="@drawable/btn_dark" />
+
             <Button
                 android:id="@+id/btn3dExit"
                 android:layout_width="wrap_content"
