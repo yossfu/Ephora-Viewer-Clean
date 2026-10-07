@@ -19,6 +19,8 @@ object PrimDecoder {
   var nZeroFix = 0L
   var nAnsweredReq = 0L
   var nFullNoRec = 0L
+  var nFullTex = 0L
+  var nFullSinTex = 0L
   var nEvict = 0L
   var nTerseQ = 0L
   var nTerseF = 0L
@@ -159,6 +161,8 @@ object PrimDecoder {
     nZeroFix = 0L
     nAnsweredReq = 0L
     nFullNoRec = 0L
+    nFullTex = 0L
+    nFullSinTex = 0L
     nEvict = 0L
     nTerseQ = 0L
     nTerseF = 0L
@@ -961,6 +965,7 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
         // TextureEntry V2 has the default image UUID first, then typed fields with face overrides.
         try {
           val te = parseTextureEntry(wA)
+          try { if (te != null && te.faces[0].uuid.isNotEmpty() && te.faces[0].uuid != NULL_UUID) nFullTex++ else nFullSinTex++ } catch(_: Throwable) {}
           if (te != null) {
             try { synchronized(recs) { val r = recs[id]; if (r != null) { val face0 = te.faces[0]; if (r.tex.isEmpty()) r.tex = face0.uuid; r.texFaces = te.faces; r.texScaleS = face0.scaleS; r.texScaleT = face0.scaleT; r.texOffsetS = face0.offsetS; r.texOffsetT = face0.offsetT; r.texRotation = face0.rotation; r.texR = face0.r; r.texG = face0.g; r.texB = face0.b; r.texA = face0.a } } } catch(_: Throwable) {}
             try { if (texIds.size < 8 && texIds.add(id)) { val tl = "TEX-UUID id=" + id + " u=" + te.faces[0].uuid + " id8=" + te.faces[0].uuid.take(8) + " uv=" + te.faces[0].scaleS + "," + te.faces[0].scaleT + "," + te.faces[0].offsetS + "," + te.faces[0].offsetT + "," + te.faces[0].rotation; try { texEmitTotal++ } catch(_: Throwable) {}; try { texEmitSesion++ } catch(_: Throwable) {}; try { onTexLine?.invoke(tl) } catch(_: Throwable) {} } } catch(_: Throwable) {}
@@ -1243,6 +1248,22 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
       }
       return "SHAPE-N tot=" + tot + " has=" + has + " paths=" + hs
     } catch(_: Throwable) { return "SHAPE-N error" }
+  }
+  fun shapeMuestra(): String {
+    try {
+      val arr = ArrayList<String>()
+      synchronized(recs) {
+        val shaped = recs.values.filter { it.tipo != 47 && it.hasShape }
+        val sorted = shaped.sortedBy { r -> (r.x - pubAx) * (r.x - pubAx) + (r.y - pubAy) * (r.y - pubAy) + (r.z - pubAz) * (r.z - pubAz) }
+        for (r in sorted.take(3)) {
+          arr.add(r.id.toString() + " xyz=" + "%.1f,%.1f,%.1f".format(r.x, r.y, r.z) + " path=" + r.pathCurve + " prof=" + r.profileCurve + " pb=" + r.shPb + " pe=" + r.shPe + " qb=" + r.shQb + " qe=" + r.shQe + " dist=" + Math.sqrt((r.x - pubAx) * (r.x - pubAx) + (r.y - pubAy) * (r.y - pubAy) + (r.z - pubAz) * (r.z - pubAz)).toInt() + "m")
+        }
+      }
+      return "SHAPE-MUESTRA " + (if (arr.isEmpty()) "sin-formas" else arr.joinToString(" | "))
+    } catch(_: Throwable) { return "SHAPE-MUESTRA error" }
+  }
+  fun fullTexLine(): String {
+    return "FULL-TEX conTex=" + nFullTex + " sinTex=" + nFullSinTex
   }
   fun publish(ax: Double, ay: Double, az: Double): List<Prim> {
     try {

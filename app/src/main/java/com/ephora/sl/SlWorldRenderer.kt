@@ -88,6 +88,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   @Volatile private var frCull = 0
   @Volatile private var frMesh = 0
   @Volatile private var frShaped = 0
+  @Volatile private var frShapedTry = 0
   @Volatile private var frTex = 0
   @Volatile private var frBeige = 0
   @Volatile private var frAvatar = 0
@@ -125,7 +126,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     try { frPrev.addAll(ids) } catch(_: Throwable) {}
   }
   fun frameLine(): String {
-    return "ADV-FRAME pub=" + frPub + " cull=" + frCull + " mesh=" + frMesh + " forma=" + frShaped + " tex=" + frTex + " beige=" + frBeige + " avatar=" + frAvatar + " malla=[" + frMuMesh + "] formaM=[" + frMuShaped + "] texM=[" + frMuTex + "] beigeM=[" + frMuBeige + "] " + frDiffLatch
+    return "ADV-FRAME pub=" + frPub + " cull=" + frCull + " mesh=" + frMesh + " forma=" + frShaped + " formaTry=" + frShapedTry + " tex=" + frTex + " beige=" + frBeige + " avatar=" + frAvatar + " malla=[" + frMuMesh + "] formaM=[" + frMuShaped + "] texM=[" + frMuTex + "] beigeM=[" + frMuBeige + "] " + frDiffLatch
   }
 
   fun applyMetrics(w: Int, h: Int) { width = w.coerceAtLeast(1); height = h.coerceAtLeast(1) }
@@ -336,6 +337,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       frCull = 0
       frMesh = 0
       frShaped = 0
+      frShapedTry = 0
       frTex = 0
       frBeige = 0
       frAvatar = 0
@@ -364,6 +366,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
         val meshGeometry = if (!isAvatar && o.meshId.isNotEmpty()) MeshAssets.mesh(o.meshId) else null
         val shaped = if (!isAvatar && o.hasShape) PrimShapes.obtain(PrimShapes.quantize(o.pathCurve, o.profileCurve, o.shPb, o.shPe, o.shPsx, o.shPsy, o.shShx, o.shShy, o.shTw, o.shTwb, o.shRo, o.shTpx, o.shTpy, o.shRev, o.shSk, o.shQb, o.shQe, o.shQh)) else null
         if (!isAvatar && o.meshId.isNotEmpty()) meshReferences++
+        try { if (!isAvatar && o.hasShape) frShapedTry++ } catch(_: Throwable) {}
         if (isAvatar) frAvatar++
         else if (meshGeometry != null) frMesh++
         else if (shaped != null) frShaped++

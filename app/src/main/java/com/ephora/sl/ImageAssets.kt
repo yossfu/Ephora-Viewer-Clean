@@ -147,7 +147,7 @@ object ImageAssets {
   @Synchronized fun bitmap(uuid: String): Bitmap? = bitmaps[uuid.lowercase()]
   @Synchronized fun has(uuid: String): Boolean = bitmaps.containsKey(uuid.lowercase())
   @Synchronized fun pendingTop(): String {
-    val ids = pending.keys.map { it.take(8) }.take(12)
+    val ids = pending.entries.take(12).map { e -> e.key.take(8) + "=" + e.value.byteCount() + "/" + e.value.expected }
     return "IMAGE-PEND-DET n=" + pending.size + " ids=" + (if (ids.isEmpty()) "-" else ids.joinToString(","))
   }
   @Synchronized fun touchIds(ids: List<String>) {

@@ -27,9 +27,13 @@ object PrimShapes {
   }
   @Volatile var budget = 0
   @Volatile var nBuilt = 0L
+  @Volatile var nTry = 0L
   @Volatile var nCacheHit = 0L
+  @Volatile var nFailPath = 0L
+  @Volatile var nFailRango = 0L
+  @Volatile var nFailGeo = 0L
   fun status(): String {
-    return "SHAPES built=" + nBuilt + " hits=" + nCacheHit + " cached=" + cache.size
+    return "SHAPES built=" + nBuilt + " try=" + nTry + " hits=" + nCacheHit + " cached=" + cache.size + " fPath=" + nFailPath + " fRango=" + nFailRango + " fGeo=" + nFailGeo
   }
   fun quantize(path: Int, profCurve: Int, pb: Float, pe: Float, psx: Float, psy: Float, shx: Float, shy: Float, tw: Float, twb: Float, ro: Float, tpx: Float, tpy: Float, rev: Float, sk: Float, qb: Float, qe: Float, qh: Float): Params {
     val prof = profCurve and 0x0F
@@ -47,9 +51,10 @@ object PrimShapes {
           return it
         }
       }
+      try { nTry++ } catch(_: Throwable) {}
       if (budget <= 0) return null
-      budget--
       val m = build(k) ?: return null
+      budget--
       synchronized(cache) {
         cache[Key(k)] = m
       }
@@ -253,9 +258,9 @@ object PrimShapes {
   }
   fun build(k: Params): Mesh? {
     try {
-      if (k.path != 16 && k.path != 32 && k.path != 48 && k.path != 128) return null
-      if (k.pathEnd <= k.pathBegin + 0.001f) return null
-      if (k.profileEnd <= k.profileBegin + 0.001f) return null
+      if (k.path != 16 && k.path != 32 && k.path != 48 && k.path != 128) { try { nFailPath++ } catch(_: Throwable) {}; return null }
+      if (k.pathEnd <= k.pathBegin + 0.001f) { try { nFailRango++ } catch(_: Throwable) {}; return null }
+      if (k.profileEnd <= k.profileBegin + 0.001f) { try { nFailRango++ } catch(_: Throwable) {}; return null }
       if (k.path == 16) return buildStraight(k)
       return buildCircular(k)
     } catch (_: Throwable) {
@@ -267,7 +272,7 @@ object PrimShapes {
     val profClosed = k.prof != 5
     var outer = baseLoop(k.prof, 0, n)
     outer = trimLoop(outer, profClosed, k.profileBegin, k.profileEnd, n)
-    if (outer.size < 3) return null
+    if (outer.size < 3) { try { nFailGeo++ } catch(_: Throwable) {}; return null }
     val hollowOn = k.profileHollow > 0.001f
     var inner = mutableListOf<V2>()
     if (hollowOn) {
@@ -425,7 +430,7 @@ object PrimShapes {
     var outer = baseLoop(k.prof, 0, n)
     val profClosed = k.prof != 5
     outer = trimLoop(outer, profClosed, k.profileBegin, k.profileEnd, n)
-    if (outer.size < 2) return null
+    if (outer.size < 2) { try { nFailGeo++ } catch(_: Throwable) {}; return null }
     val hollowOn = k.profileHollow > 0.001f && !isSphere
     var inner = mutableListOf<V2>()
     if (hollowOn) {
@@ -532,8 +537,8 @@ object PrimShapes {
     return soupToMesh(s)
   }
   private fun soupToMesh(s: Soup): Mesh? {
-    if (s.n == 0) return null
-    if (s.n > 20000) return null
+    if (s.n == 0) { try { nFailGeo++ } catch(_: Throwable) {}; return null }
+    if (s.n > 20000) { try { nFailGeo++ } catch(_: Throwable) {}; return null }
     val bb = ByteBuffer.allocateDirect(s.d.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
     for (v in s.d) bb.put(v)
     bb.position(0)
