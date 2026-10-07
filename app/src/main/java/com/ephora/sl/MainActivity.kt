@@ -378,8 +378,7 @@ class MainActivity : ComponentActivity() {
     }
     fun udpLog(line: String) {
       lastUdp = (lastUdp + "\n" + line).takeLast(12000)
-      try { if (line.startsWith("TEX-UUID") && !TexFetch.done) TexFetch.kick({ s -> try { udpLog(s) } catch(_: Throwable) {} }) } catch(_: Throwable) {}
-      try { if (line.startsWith("TEX-UUID")) scope.launch(Dispatchers.IO) { try { AgentLoop.sendImageReqBody("ui") } catch(_: Throwable) {} } } catch(_: Throwable) {}
+      // Texture transport is scheduled centrally by AgentLoop/TexFetch.
       try {
         if (line.startsWith("TP-FINISH")) {
           val ip = line.substringAfter("ip=").substringBefore(" ")

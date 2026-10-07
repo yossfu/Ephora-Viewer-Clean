@@ -256,31 +256,7 @@ object UdpCircuit {
     if (d.msgId != 1 || d.payload.isEmpty()) return null
     return d.payload[0].toInt() and 0xFF
   }
-  // RequestImage High 8 (message_template.msg: "RequestImage High 8 NotTrusted Unencoded" AgentData{AgentID,SessionID}+RequestImage{Image LLUUID,DiscardLevel S8,DownloadPriority F32,Packet U32,Type U8}; libopenmetaverse RequestImagePacket: Frequency=High ID=8 Reliable=true base 7B). Diferencial chat-vs-request: H1 destino=FALSO (mismo loopAddr/simPort en ambas vias), H2 zerocode=FALSO (el chat sale sin 0x80 y llega con acks+eco). Causa del silencio total: se enviaba Low-8 (FF FF 00 08, mensaje inexistente) y se escuchaba Low-9/10 (ImageData/ImagePacket reales son High 9/10 de 1 byte).
-  fun requestImageUnrel(agentId: String, sessionId: String, imageUuid: String): ByteArray {
-    return requestImageBody(headerUnreliable(), agentId, sessionId, imageUuid, 0)
-  }
-  fun requestImageType1(agentId: String, sessionId: String, imageUuid: String): ByteArray {
-    return requestImageBody(headerReliable(), agentId, sessionId, imageUuid, 1)
-  }
-  fun requestImageLow8(agentId: String, sessionId: String, imageUuid: String): ByteArray {
-    val h = headerReliable()
-    val p = ByteBuffer.allocate(4 + 32 + 1 + 26).order(ByteOrder.LITTLE_ENDIAN)
-    p.putShort(-1)
-    p.put(0x00.toByte())
-    p.put(0x08.toByte())
-    p.order(ByteOrder.BIG_ENDIAN)
-    p.put(uuidBE(agentId))
-    p.put(uuidBE(sessionId))
-    p.put(1.toByte())
-    p.put(uuidBE(imageUuid))
-    p.order(ByteOrder.LITTLE_ENDIAN)
-    p.put(0.toByte())
-    p.putFloat(100000f)
-    p.putInt(0)
-    p.put(0.toByte())
-    return h + p.array()
-  }
+  // RequestImage High 8, reliable, unencoded.
   fun requestImage(agentId: String, sessionId: String, imageUuid: String): ByteArray {
     return requestImageBody(headerReliable(), agentId, sessionId, imageUuid, 0)
   }

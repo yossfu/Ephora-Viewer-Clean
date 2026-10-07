@@ -1,347 +1,235 @@
 package com.ephora.sl
-import java.util.HashSet
-import kotlinx.coroutines.*
+
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.PriorityBlockingQueue
+import java.util.concurrent.TimeUnit
+
+/**
+ * Production texture transport for Second Life.
+ *
+ * HTTP is the primary path (ViewerAsset, then GetTexture). UDP RequestImage is
+ * managed separately by AgentLoop with a hard two-transfer limit, matching
+ * the reference/Lumiya transfer model.
+ *
+ * No diagnostic URL probing or synthetic protocol traffic belongs here.
+ */
 object TexFetch {
-  var done = false
-  private var flying = false
-  private data class TexResp(val code: Int, val ct: String, val bytes: ByteArray, val loc: String, val srv: String, val xh: String, val clen: String, val txt: String)
-  private fun bodyTxt(b: ByteArray): String {
-    try {
-      val s = String(b, Charsets.UTF_8)
-      return s.replace("\r", "").replace("\n", " ").take(400)
-    } catch(_: Throwable) { return "-" }
-  }
-  private fun forceHttps(url: String): String {
-    try {
-      if (url.startsWith("http://") && url.contains("asset-cdn")) return url.replaceFirst("http://", "https://")
-    } catch(_: Throwable) {}
-    return url
-  }
-  private fun esqOf(url: String): String {
-    try {
-      if (url.startsWith("https://")) return "https"
-      if (url.startsWith("http://")) return "http"
-    } catch(_: Throwable) {}
-    return "?"
-  }
-  private data class TexRes(val code: Int, val ct: String, val len: Int, val hex16: String, val hex64: String, val srv: String, val xh: String, val clen: String, val esq: String, val ini: Int, val loc: String, val hops: Int, val fail: String, val msg: String, val err0: String)
-  fun reset() { try { done = false; flying = false } catch(_: Throwable) {} }
-  private fun hexOf(b: ByteArray, n: Int): String {
-    try {
-      val sb = StringBuilder()
-      var i = 0
-      while (i < n && i < b.size) {
-        sb.append("%02X".format(b[i]))
-        i++
-      }
-      return sb.toString()
-    } catch(_: Throwable) { return "-" }
-  }
-  private fun buildClient(): okhttp3.OkHttpClient {
-    return okhttp3.OkHttpClient.Builder().connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS).readTimeout(30, java.util.concurrent.TimeUnit.SECONDS).writeTimeout(15, java.util.concurrent.TimeUnit.SECONDS).followRedirects(false).followSslRedirects(false).build()
-  }
-  private fun resolveUrl(base: String, loc: String): String {
-    try {
-      if (loc.startsWith("http://") || loc.startsWith("https://")) return loc
-      val u = java.net.URL(base)
-      val port = if (u.port < 0) "" else ":" + u.port
-      if (loc.startsWith("/")) return u.protocol + "://" + u.host + port + loc
-      val path = u.path
-      val dir = if (path.contains("/")) path.substring(0, path.lastIndexOf("/") + 1) else "/"
-      return u.protocol + "://" + u.host + port + dir + loc
-    } catch(_: Throwable) { return loc }
-  }
-  private fun getOnce(client: okhttp3.OkHttpClient, url: String): TexResp {
-    val req = okhttp3.Request.Builder().url(url).get().header("Accept", "*/*").header("Accept-Encoding", "identity").header("User-Agent", "EPHORASL/7.57 (Android)").header("Connection", "close").build()
-    client.newCall(req).execute().use { resp ->
-      val code = resp.code
-      val hd = resp.headers
-      val ct = try { hd["Content-Type"] ?: "?" } catch(_: Throwable) { "?" }
-      val loc = try { hd["Location"] ?: "" } catch(_: Throwable) { "" }
-      val srv = try { hd["Server"] ?: "-" } catch(_: Throwable) { "-" }
-      val cl = try { hd["Content-Length"] ?: "?" } catch(_: Throwable) { "?" }
-      var xh = ""
-      try {
-        var i = 0
-        while (i < hd.size) {
-          val nm = hd.name(i)
-          if (nm.startsWith("X-", ignoreCase = true)) {
-            if (xh.isNotEmpty()) xh += ";"
-            xh += nm + "=" + hd.value(i)
-          }
-          i++
-        }
-        if (xh.length > 220) xh = xh.take(220)
-        if (xh.isEmpty()) xh = "-"
-      } catch(_: Throwable) { xh = "-" }
-      if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
-        try { resp.body?.close() } catch(_: Throwable) {}
-        return TexResp(code, ct, ByteArray(0), loc, srv, xh, cl, "-")
-      }
-      val bytes = try { resp.body?.bytes() ?: ByteArray(0) } catch(_: Throwable) { ByteArray(0) }
-      return TexResp(code, ct, bytes, "", srv, xh, cl, bodyTxt(bytes))
+  private const val MAX_WORKERS = 4
+  private const val MAX_QUEUE = 256
+  private const val MAX_RETRIES = 2
+  private const val MAX_BYTES = 16 * 1024 * 1024
+
+  private data class Request(
+    val uuid: String,
+    val priority: Int,
+    val enqueuedAt: Long,
+    var attempt: Int = 0
+  ) : Comparable<Request> {
+    override fun compareTo(other: Request): Int {
+      val p = other.priority.compareTo(priority)
+      return if (p != 0) p else enqueuedAt.compareTo(other.enqueuedAt)
     }
   }
-  private fun runChain(client: okhttp3.OkHttpClient, startUrl: String, esq0: String, httpFallback: String, tag: String, hopOut: MutableList<String>, upHttps: Boolean): TexRes {
-    var url = startUrl
-    var esq = esq0
-    var code0 = -1
-    var loc0 = "-"
-    var hops = 0
-    var triedFallback = false
-    var err0 = "-"
-    while (hops <= 5) {
-      var r: TexResp? = null
-      var err = ""
-      try {
-        r = getOnce(client, url)
-      } catch(e: Throwable) {
-        err = e::class.java.simpleName + " " + (e.message ?: "sin-mensaje").take(160)
-      }
-      if (err.isNotEmpty()) {
-        try { hopOut.add("TEX-HOP tag=" + tag + " n=" + hops + " esq=" + esqOf(url) + " code=FAIL " + err.take(80)) } catch(_: Throwable) {}
-        try { if (err0 == "-") err0 = err.take(120) } catch(_: Throwable) {}
-        if (!triedFallback && httpFallback.isNotEmpty()) {
-          triedFallback = true
-          url = httpFallback
-          esq = "http"
-          hops += 1
-        } else {
-          return TexRes(-1, "?", 0, "-", "-", "-", "-", "?", esq, code0, loc0, hops, err, "-", err0)
-        }
-      } else if (r != null && (r.code == 301 || r.code == 302 || r.code == 303 || r.code == 307 || r.code == 308)) {
-        if (code0 < 0) {
-          code0 = r.code
-          loc0 = if (r.loc.isEmpty()) "-" else r.loc.take(120)
-        }
-        if (r.loc.isEmpty()) {
-          try { hopOut.add("TEX-HOP tag=" + tag + " n=" + hops + " esq=" + esqOf(url) + " code=" + r.code + " sin-location") } catch(_: Throwable) {}
-          return TexRes(r.code, r.ct, 0, "-", "-", r.srv, r.xh, r.clen, esq, code0, loc0, hops, "sin-location", r.txt, err0)
-        }
-        try { hopOut.add("TEX-HOP tag=" + tag + " n=" + hops + " esq=" + esqOf(url) + " code=" + r.code + " loc=" + r.loc.take(120)) } catch(_: Throwable) {}
-        if (upHttps) url = forceHttps(resolveUrl(url, r.loc)) else url = resolveUrl(url, r.loc)
-        hops += 1
-      } else if (r != null) {
-        try { hopOut.add("TEX-HOP tag=" + tag + " n=" + hops + " esq=" + esqOf(url) + " code=" + r.code + " final") } catch(_: Throwable) {}
-        return TexRes(r.code, r.ct, r.bytes.size, hexOf(r.bytes, 16), hexOf(r.bytes, 64), r.srv, r.xh, r.clen, esq, code0, loc0, hops, "", r.txt, err0)
-      }
-    }
-    return TexRes(-1, "?", 0, "-", "-", "-", "-", "?", esq, code0, loc0, hops, "demasiados-redirects", "-", err0)
-  }
-  private fun certDiag(host: String): String {
-    var sock: javax.net.ssl.SSLSocket? = null
-    try {
-      val tm = object : javax.net.ssl.X509TrustManager {
-        override fun checkClientTrusted(c: Array<java.security.cert.X509Certificate>, a: String) {}
-        override fun checkServerTrusted(c: Array<java.security.cert.X509Certificate>, a: String) {}
-        override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> { return arrayOf() }
-      }
-      val sc = javax.net.ssl.SSLContext.getInstance("TLS")
-      sc.init(null, arrayOf(tm), java.security.SecureRandom())
-      sock = sc.socketFactory.createSocket(host, 443) as javax.net.ssl.SSLSocket
-      try { sock.startHandshake() } catch(_: Throwable) {}
-      val certs = sock.session.peerCertificates
-      if (certs.isEmpty()) return "sin-cert"
-      val c0 = certs[0] as java.security.cert.X509Certificate
-      var subj = "-"
-      try { subj = c0.subjectX500Principal.name.take(160) } catch(_: Throwable) {}
-      var iss = "-"
-      try { iss = c0.issuerX500Principal.name.take(160) } catch(_: Throwable) {}
-      var sans = "-"
-      try {
-        val alt = c0.subjectAlternativeNames
-        if (alt != null) {
-          val sb = StringBuilder()
-          for (e in alt) {
-            try {
-              if (sb.isNotEmpty()) sb.append(";")
-              sb.append(e[1].toString())
-            } catch(_: Throwable) {}
-          }
-          sans = sb.toString().take(300)
-        }
-      } catch(_: Throwable) {}
-      return "subject=" + subj + " issuer=" + iss + " sans=" + sans
-    } catch(e: Throwable) { return "cert-FAIL " + e::class.java.simpleName }
-    finally { try { sock?.close() } catch(_: Throwable) {} }
-  }
-  private val inFlight = HashSet<String>()
+
+  private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+  private val queue = PriorityBlockingQueue<Request>()
+  private val queued = ConcurrentHashMap.newKeySet<String>()
+  private val inFlight = ConcurrentHashMap.newKeySet<String>()
+  private val retryAt = ConcurrentHashMap<String, Long>()
+  private val notFound = ConcurrentHashMap.newKeySet<String>()
+  private val workers = ArrayList<Job>()
+
   @Volatile private var httpOk = 0L
   @Volatile private var httpFail = 0L
+  @Volatile private var http404 = 0L
+  @Volatile private var decodeAccepted = 0L
+  @Volatile private var lastError = "-"
+  @Volatile var done = false
+    private set
 
-  /** Fetch visible object textures through the GetTexture capability. UDP remains available as fallback. */
-  fun requestVisible(ids: List<String>, max: Int = 4): Int {
-    val base = try { CapsManager.caps["GetTexture"] ?: "" } catch(_: Throwable) { "" }
-    if (base.isBlank() || max <= 0) return 0
-    var started = 0
-    for (raw in ids.distinct()) {
-      if (started >= max) break
-      val uuid = raw.lowercase()
-      try { java.util.UUID.fromString(uuid) } catch(_: Throwable) { continue }
-      if (ImageAssets.has(uuid)) continue
-      var take = false
-      synchronized(inFlight) {
-        if (!inFlight.contains(uuid)) { inFlight.add(uuid); take = true }
-      }
-      if (!take) continue
-      started++
-      CoroutineScope(Dispatchers.IO).launch {
-        try {
-          val url = base.trimEnd('/') + "/?texture_id=" + uuid
-          val client = okhttp3.OkHttpClient.Builder()
-            .connectTimeout(12, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(45, java.util.concurrent.TimeUnit.SECONDS)
-            .writeTimeout(12, java.util.concurrent.TimeUnit.SECONDS)
-            .followRedirects(true).followSslRedirects(true).build()
-          val req = okhttp3.Request.Builder().url(url).get()
-            .header("Accept", "image/x-j2c")
-            .header("Accept-Encoding", "identity")
-            .header("User-Agent", "EPHORASL/7.70 (Android)")
-            .header("Connection", "close").build()
-          client.newCall(req).execute().use { resp ->
-            val bytes = try { resp.body?.bytes() ?: ByteArray(0) } catch(_: Throwable) { ByteArray(0) }
-            if (resp.isSuccessful && bytes.isNotEmpty() && bytes.size <= 16 * 1024 * 1024) {
-              if (ImageAssets.acceptHttpJ2c(uuid, bytes)) {
-                httpOk++
-                try { AgentLoop.onTick?.invoke("TEX-HTTP-OK id8=" + uuid.take(8) + " bytes=" + bytes.size + " code=" + resp.code) } catch(_: Throwable) {}
-              } else {
-                httpFail++
-                try { AgentLoop.onTick?.invoke("TEX-HTTP-FAIL id8=" + uuid.take(8) + " cause=cache-rechazado") } catch(_: Throwable) {}
-              }
-            } else {
-              httpFail++
-              try { AgentLoop.onTick?.invoke("TEX-HTTP-FAIL id8=" + uuid.take(8) + " code=" + resp.code + " bytes=" + bytes.size + " ct=" + (resp.header("Content-Type") ?: "-")) } catch(_: Throwable) {}
-            }
-          }
-        } catch(e: Throwable) {
-          httpFail++
-          try { AgentLoop.onTick?.invoke("TEX-HTTP-FAIL id8=" + uuid.take(8) + " cause=" + e::class.java.simpleName + ":" + (e.message ?: "").take(120)) } catch(_: Throwable) {}
-        } finally {
-          synchronized(inFlight) { inFlight.remove(uuid) }
-        }
-      }
-    }
-    return started
+  private val client: okhttp3.OkHttpClient by lazy {
+    okhttp3.OkHttpClient.Builder()
+      .dispatcher(okhttp3.Dispatcher().apply {
+        maxRequests = MAX_WORKERS
+        maxRequestsPerHost = MAX_WORKERS
+      })
+      .connectTimeout(15, TimeUnit.SECONDS)
+      .readTimeout(45, TimeUnit.SECONDS)
+      .writeTimeout(15, TimeUnit.SECONDS)
+      .retryOnConnectionFailure(true)
+      .followRedirects(true)
+      .followSslRedirects(true)
+      .protocols(listOf(okhttp3.Protocol.HTTP_2, okhttp3.Protocol.HTTP_1_1))
+      .build()
   }
 
-  fun httpStatus(): String = synchronized(inFlight) { "TEX-HTTP ok=" + httpOk + " fail=" + httpFail + " inflight=" + inFlight.size }
+  init {
+    repeat(MAX_WORKERS) {
+      workers += scope.launch { workerLoop() }
+    }
+  }
+
+  fun reset() {
+    done = false
+    notFound.clear()
+    retryAt.clear()
+    queued.clear()
+    queue.clear()
+    inFlight.clear()
+    lastError = "-"
+    httpOk = 0L
+    httpFail = 0L
+    http404 = 0L
+    decodeAccepted = 0L
+  }
+
+  /**
+   * Queue the nearest visible textures first. PrimDecoder already returns
+   * texture UUIDs in distance order, so this queue preserves spatial priority.
+   */
+  fun requestVisible(ids: List<String>, max: Int = 24): Int {
+    if (max <= 0 || ids.isEmpty()) return 0
+    if (textureBaseUrls().isEmpty()) return 0
+    var added = 0
+    val now = System.currentTimeMillis()
+
+    for (raw in ids.distinct()) {
+      if (added >= max || queue.size >= MAX_QUEUE) break
+      val uuid = raw.lowercase()
+      try { UUID.fromString(uuid) } catch (_: Throwable) { continue }
+      if (ImageAssets.has(uuid) || inFlight.contains(uuid) || queued.contains(uuid) || notFound.contains(uuid)) continue
+      if ((retryAt[uuid] ?: 0L) > now) continue
+      if (queued.add(uuid)) {
+        queue.offer(Request(uuid, 1000 - added, now))
+        added++
+      }
+    }
+    return added
+  }
+
+  /** Compatibility hook for a TextureEntry event; actual work stays in the bounded queue. */
   fun kick(onLine: (String) -> Unit) {
     try {
-      if (done || flying) return
-      flying = true
-    } catch(_: Throwable) { return }
-    CoroutineScope(Dispatchers.IO).launch {
+      val uuid = PrimDecoder.pollTexFull()?.lowercase() ?: return
+      if (requestVisible(listOf(uuid), 1) > 0) onLine("TEX-QUEUE id8=" + uuid.take(8))
+    } catch (_: Throwable) {}
+  }
+
+  private fun textureBaseUrls(): List<String> {
+    val out = LinkedHashSet<String>()
+    try { CapsManager.caps["ViewerAsset"]?.takeIf { it.isNotBlank() }?.let { out.add(it) } } catch (_: Throwable) {}
+    try { CapsManager.caps["GetTexture"]?.takeIf { it.isNotBlank() }?.let { out.add(it) } } catch (_: Throwable) {}
+    return out.toList()
+  }
+
+  private suspend fun workerLoop() {
+    while (isActive) {
+      val request = try { queue.take() } catch (_: InterruptedException) { continue }
+      queued.remove(request.uuid)
+      if (ImageAssets.has(request.uuid) || notFound.contains(request.uuid)) continue
+      inFlight.add(request.uuid)
       try {
-        val uuid = try { PrimDecoder.pollTexFull() } catch(_: Throwable) { null }
-        if (uuid.isNullOrEmpty()) {
-          try { flying = false } catch(_: Throwable) {}
-          try { onLine("TEX-ESTADO con=0 fetch=sin-uuid") } catch(_: Throwable) {}
-          return@launch
+        val ok = fetch(request)
+        if (!ok && !notFound.contains(request.uuid) && request.attempt < MAX_RETRIES) {
+          request.attempt++
+          val backoff = 1500L * (1L shl (request.attempt - 1))
+          retryAt[request.uuid] = System.currentTimeMillis() + backoff
+          delay(backoff)
+          retryAt.remove(request.uuid)
+          if (!ImageAssets.has(request.uuid) && queued.add(request.uuid)) queue.offer(request)
         }
-        val base = try { CapsManager.caps["GetTexture"] ?: "" } catch(_: Throwable) { "" }
-        if (base.isBlank()) {
-          try { flying = false } catch(_: Throwable) {}
-          try { onLine("TEX-ESTADO con=0 u=" + uuid.take(8) + " fetch=sin-cap-GetTexture") } catch(_: Throwable) {}
-          return@launch
+      } catch (e: Throwable) {
+        httpFail++
+        lastError = e::class.java.simpleName + ":" + (e.message ?: "").take(120)
+        if (!notFound.contains(request.uuid) && request.attempt < MAX_RETRIES) {
+          request.attempt++
+          delay(1500L * (1L shl (request.attempt - 1)))
+          if (!ImageAssets.has(request.uuid) && queued.add(request.uuid)) queue.offer(request)
         }
-        var shape = "len=" + base.length
-        try {
-          val u = java.net.URL(base)
-          var hasQ = "no"
-          try { if (u.query != null && u.query.isNotEmpty()) hasQ = "si" } catch(_: Throwable) {}
-          shape = "len=" + base.length + " pathLen=" + u.path.length + " query=" + hasQ
-        } catch(_: Throwable) {}
-        try { onLine("TEX-CAP capHost=" + CapsManager.seedHostOf(base) + " esqCap=" + esqOf(base)) } catch(_: Throwable) {}
-        try { onLine("TEX-CAP-FULL-shape " + shape) } catch(_: Throwable) {}
-        val httpsBase = if (base.startsWith("http://")) base.replaceFirst("http://", "https://") else ""
-        val nodash = uuid.replace("-", "")
-        val bhttp = if (base.startsWith("https://")) base.replaceFirst("https://", "http://") else base
-        val btrim = bhttp.trimEnd('/')
-        val client = buildClient()
-        val hopLines = mutableListOf<String>()
-        var urlH = base + "?texture_id=" + uuid
-        var esqH = "http"
-        var fbH = ""
-        if (httpsBase.isNotEmpty()) {
-          urlH = httpsBase + "?texture_id=" + uuid
-          esqH = "https"
-          fbH = base + "?texture_id=" + uuid
-        }
-        val rH = runChain(client, urlH, esqH, fbH, "https-query", hopLines, true)
-        var certLine = ""
-        try {
-          val blob = rH.err0 + "|" + rH.fail
-          if (blob.contains("SSL") || blob.contains("erif")) {
-            var hh = ""
-            try { hh = java.net.URL(urlH).host } catch(_: Throwable) {}
-            if (hh.isNotEmpty()) certLine = certDiag(hh)
-          }
-        } catch(_: Throwable) {}
-        // HTTP sin firma = AccessDenied esperado (testigo 403); la via real es UDP RequestImage.
-        val tries = listOf("path-dash" to btrim + "/" + uuid, "path-nodash" to btrim + "/" + nodash)
-        val res4 = mutableListOf<TexRes>()
-        for (tt in tries) {
-          var rr: TexRes? = null
-          try { rr = runChain(client, tt.second, "http", "", tt.first, hopLines, false) } catch(_: Throwable) {}
-          if (rr != null) res4.add(rr)
-        }
-        try { for (h in hopLines) onLine(h) } catch(_: Throwable) {}
-        if (rH.fail.isNotEmpty()) {
-          try { onLine("TEX-ESTADO con=0 u=" + uuid.take(8) + " fetch-FAIL " + rH.fail + " tag=https-query") } catch(_: Throwable) {}
-        } else if (rH.code == 403) {
-          try { onLine("TEX-403 intento=https-query code=403 ct=" + rH.ct + " len=" + rH.len + " hex16=" + rH.hex16 + " srv=" + rH.srv + " clen=" + rH.clen + " xh=" + rH.xh + " esq=" + rH.esq + " ini=" + rH.ini + " hops=" + rH.hops + " msg=" + rH.msg + " err0=" + rH.err0) } catch(_: Throwable) {}
-        }
-        if (certLine.isNotEmpty()) {
-          try { onLine("TEX-CERT " + certLine) } catch(_: Throwable) {}
-        }
-        for (i in res4.indices) {
-          val tag = tries[i].first
-          val r = res4[i]
-          if (r.fail.isNotEmpty()) {
-            try { onLine("TEX-ESTADO con=0 u=" + uuid.take(8) + " fetch-FAIL " + r.fail + " tag=" + tag) } catch(_: Throwable) {}
-          } else if (r.code == 403) {
-            try { onLine("TEX-403 intento=" + tag + " code=403 ct=" + r.ct + " len=" + r.len + " hex16=" + r.hex16 + " srv=" + r.srv + " clen=" + r.clen + " xh=" + r.xh + " esq=" + r.esq + " ini=" + r.ini + " hops=" + r.hops + " msg=" + r.msg + " err0=" + r.err0) } catch(_: Throwable) {}
-          } else if (r.code in 200..299) {
-            try { done = true } catch(_: Throwable) {}
-            try { onLine("TEX-ESTADO con=1 u=" + uuid.take(8) + " bytes=" + r.len + " ct=" + r.ct + " code=" + r.code + " tag=" + tag) } catch(_: Throwable) {}
-          } else {
-            try { onLine("TEX-ESTADO con=0 u=" + uuid.take(8) + " fetch-HTTP code=" + r.code + " ct=" + r.ct + " len=" + r.len + " tag=" + tag) } catch(_: Throwable) {}
-          }
-        }
-        try {
-          val hopMark = hopLines.size
-          val vaBase = try { CapsManager.viewerAssetUrl } catch(_: Throwable) { "" }
-          if (vaBase.isBlank()) {
-            try { onLine("TEX-CAP2 viewerAssetHost=vacio causa=sin-url-en-seed paso=pedir-cap-por-region") } catch(_: Throwable) {}
-          } else {
-            var vaHost = "?"
-            try { vaHost = java.net.URL(vaBase).host } catch(_: Throwable) {}
-            try { onLine("TEX-CAP2 viewerAssetHost=" + vaHost) } catch(_: Throwable) {}
-            val vaUrl = vaBase.trimEnd('/') + "/?texture_id=" + uuid
-            var vaRes: TexRes? = null
-            try { vaRes = runChain(client, vaUrl, esqOf(vaUrl), "", "viewer-asset", hopLines, false) } catch(_: Throwable) {}
-            try { for (i in hopMark until hopLines.size) onLine(hopLines[i]) } catch(_: Throwable) {}
-            if (vaRes != null) {
-              if (vaRes.fail.isNotEmpty()) {
-                try { onLine("TEX-ESTADO con=0 u=" + uuid.take(8) + " fetch-FAIL " + vaRes.fail + " tag=viewer-asset") } catch(_: Throwable) {}
-              } else if (vaRes.code in 200..299) {
-                try { done = true } catch(_: Throwable) {}
-                try { onLine("TEX-HTTP200 u=" + uuid.take(8) + " bytes=" + vaRes.len + " ct=" + vaRes.ct + " tag=viewer-asset") } catch(_: Throwable) {}
+      } finally {
+        inFlight.remove(request.uuid)
+      }
+    }
+  }
+
+  private fun fetch(request: Request): Boolean {
+    val bases = textureBaseUrls()
+    if (bases.isEmpty()) return false
+
+    for ((index, base) in bases.withIndex()) {
+      val url = base.trimEnd('/') + "/?texture_id=" + request.uuid
+      try {
+        val http = okhttp3.Request.Builder()
+          .url(url)
+          .header("Accept", "image/x-j2c")
+          .header("Accept-Encoding", "identity")
+          .header("User-Agent", "EPHORASL/7.70")
+          .build()
+
+        client.newCall(http).execute().use { response ->
+          when {
+            response.code == 404 -> {
+              http404++
+              httpFail++
+              lastError = "HTTP404"
+              if (index == bases.lastIndex) notFound.add(request.uuid)
+            }
+
+            !response.isSuccessful -> {
+              httpFail++
+              lastError = "HTTP" + response.code
+            }
+
+            else -> {
+              val body = response.body?.bytes() ?: ByteArray(0)
+              if (body.isEmpty() || body.size > MAX_BYTES) {
+                httpFail++
+                lastError = "bad-body=" + body.size
               } else {
-                try { onLine("TEX-ESTADO con=0 u=" + uuid.take(8) + " fetch-HTTP code=" + vaRes.code + " ct=" + vaRes.ct + " len=" + vaRes.len + " tag=viewer-asset causa=" + (if (vaRes.code == 403) "base-o-firma tag-pendiente" else "ver-TEX-HOP")) } catch(_: Throwable) {}
+                httpOk++
+                if (ImageAssets.acceptHttpJ2c(request.uuid, body)) {
+                  decodeAccepted++
+                  done = true
+                  try {
+                    AgentLoop.onTick?.invoke(
+                      "TEX-HTTP-OK id8=" + request.uuid.take(8) +
+                        " bytes=" + body.size +
+                        " code=" + response.code +
+                        " base=" + if (index == 0) "ViewerAsset" else "GetTexture"
+                    )
+                  } catch (_: Throwable) {}
+                  return true
+                }
+                httpFail++
+                lastError = "decode-rejected"
               }
             }
           }
-        } catch(_: Throwable) {}
-        var tabla = "TEX-TABLA"
-        try {
-          for (i in res4.indices) tabla += " " + tries[i].first + "=" + res4[i].code + "/" + res4[i].ct + "/" + res4[i].len
-        } catch(_: Throwable) {}
-        try { onLine(tabla) } catch(_: Throwable) {}
-        try { flying = false } catch(_: Throwable) {}
-      } catch(_: Throwable) {
-        try { flying = false } catch(_: Throwable) {}
+        }
+      } catch (e: Throwable) {
+        httpFail++
+        lastError = e::class.java.simpleName + ":" + (e.message ?: "").take(120)
       }
     }
+    return false
+  }
+
+  fun status(): String {
+    return "TEX-HTTP ok=" + httpOk +
+      " fail=" + httpFail +
+      " 404=" + http404 +
+      " accepted=" + decodeAccepted +
+      " queued=" + queue.size +
+      " inflight=" + inFlight.size +
+      " cache=" + ImageAssets.bitmapCount() +
+      " last=" + lastError
   }
 }

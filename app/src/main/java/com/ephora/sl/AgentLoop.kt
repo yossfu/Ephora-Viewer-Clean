@@ -245,139 +245,56 @@ object AgentLoop {
   }
   val imgHexDone = LinkedHashSet<String>()
   var loopT0 = 0L
-  val imgUnrelSent = LinkedHashSet<String>()
-  var sintDone = false
-  @Volatile var sintLine = "TEST-SINT-pendiente"
-  @Volatile var destLine = "IMAGE-DEST pendiente"
-  var imgCtrlDone = false
-  fun sintTestOnce() {
-    try { if (sintDone) return; sintDone = true } catch(_: Throwable) { return }
-    try { imageSelfTest() } catch(_: Throwable) {}
-  }
-  fun imageSelfTest() {
-    try {
-      val fake = ByteArray(16) { (it + 1).toByte() }
-      var ok9 = false
-      var ok10 = false
-      var ok86 = false
-      try {
-        val p = java.nio.ByteBuffer.allocate(37).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-        p.put(0xFF.toByte()); p.put(0xFF.toByte()); p.put(0x00.toByte()); p.put(0x09.toByte())
-        p.order(java.nio.ByteOrder.BIG_ENDIAN)
-        p.put(fake)
-        p.order(java.nio.ByteOrder.LITTLE_ENDIAN)
-        p.put(2.toByte()); p.putInt(100); p.putShort(3); p.putShort(8)
-        p.put(ByteArray(8) { 0x41.toByte() })
-        val pkt = UdpCircuit.headerUnreliable() + p.array()
-        val d = UdpCircuit.decode(pkt, pkt.size)
-        val line = if (d != null) UdpCircuit.parseImage(d.msgId, d.payload) else null
-        ok9 = line != null && line.startsWith("IMAGE-DATA")
-      } catch(_: Throwable) {}
-      try {
-        val p = java.nio.ByteBuffer.allocate(32).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-        p.put(0xFF.toByte()); p.put(0xFF.toByte()); p.put(0x00.toByte()); p.put(0x0A.toByte())
-        p.order(java.nio.ByteOrder.BIG_ENDIAN)
-        p.put(fake)
-        p.order(java.nio.ByteOrder.LITTLE_ENDIAN)
-        p.putShort(7); p.putShort(8)
-        p.put(ByteArray(8) { 0x42.toByte() })
-        val pkt = UdpCircuit.headerUnreliable() + p.array()
-        val d = UdpCircuit.decode(pkt, pkt.size)
-        val line = if (d != null) UdpCircuit.parseImage(d.msgId, d.payload) else null
-        ok10 = line != null && line.startsWith("IMAGE-DATA")
-      } catch(_: Throwable) {}
-      try {
-        val pkt = UdpCircuit.headerUnreliable() + byteArrayOf(0x56.toByte()) + fake
-        val d = UdpCircuit.decode(pkt, pkt.size)
-        val line = if (d != null) UdpCircuit.parseImage(d.msgId, d.payload) else null
-        ok86 = line != null && line.startsWith("IMAGE-DATA")
-      } catch(_: Throwable) {}
-      try {
-        val bad = mutableListOf<String>()
-        if (!ok9) bad.add("data9")
-        if (!ok10) bad.add("packet10")
-        if (!ok86) bad.add("notindb86")
-        try { sintLine = if (bad.isEmpty()) "TEST-SINT-OK 3/3" else "TEST-SINT-FALLO " + bad.joinToString(",") } catch(_: Throwable) {}
-        if (bad.isEmpty()) onTick?.invoke("TEST-SINT-OK 3/3") else onTick?.invoke("TEST-SINT-FALLO " + bad.joinToString(","))
-      } catch(_: Throwable) {}
-    } catch(_: Throwable) {}
-  }
+  @Volatile var sintLine = "synthetic-tests-removed"
   fun sendImageReqBody(src: String = "tick"): Boolean {
     return try {
       val s = LoginManager.Session
-      val sk = loopSock
-      if (sk == null) { try { onTick?.invoke("IMAGE-REQ-ERROR socket-nulo") } catch(_: Throwable) {}; return false }
-      val ad = loopAddr
-      if (ad == null) { try { onTick?.invoke("IMAGE-REQ-ERROR sin-destino") } catch(_: Throwable) {}; return false }
-      if (s.agentId.isBlank() || s.sessionId.isBlank()) { try { onTick?.invoke("IMAGE-REQ-ERROR sin-sesion") } catch(_: Throwable) {}; return false }
-      val uuids = try { (TerrainComposition.textureIds() + PrimDecoder.texList(px, py, pz)).distinct().take(768) } catch(_: Throwable) { emptyList<String>() }
-      if (uuids.isEmpty()) {
-        try { onTick?.invoke("IMAGE-REQ sin-uuid") } catch(_: Throwable) {}
-        return false
+      val sk = loopSock ?: return false
+      val ad = loopAddr ?: return false
+      if (s.agentId.isBlank() || s.sessionId.isBlank() || s.simPort == 0) return false
+
+      val now = System.currentTimeMillis()
+      val ids = (TerrainComposition.textureIds() + PrimDecoder.texList(px, py, pz)).distinct()
+
+      var active = 0
+      for (u in imgReqSent) {
+        if (ImageAssets.has(u)) continue
+        if (ImageAssets.hasPending(u) || now - (imgReqTime[u] ?: now) < 20_000L) active++
       }
-      try { ImageAssets.touchIds(uuids.take(96)) } catch(_: Throwable) {}
-      var n = 0
-      var cupo = 96
-      for (u in uuids) {
-        try { if (cupo <= 0 && !imgReqSent.contains(u)) break } catch(_: Throwable) {}
-        if (imgReqSent.contains(u)) {
-          try {
-            val last = imgReqTime[u] ?: 0L
-            val tries = imgReqTry[u] ?: 1
-            if (tries < 3 && !imgLista(u) && System.currentTimeMillis() - last > 20000L) {
-              val b2 = UdpCircuit.requestImagePacket(s.agentId, s.sessionId, u, 0)
-              val seq2 = try { ByteBuffer.wrap(b2, 1, 4).order(ByteOrder.BIG_ENDIAN).int.toLong() and 0xFFFFFFFFL } catch(_: Throwable) { UdpCircuit.lastSeq() }
-              try {
-                sk.send(DatagramPacket(b2, b2.size, ad, s.simPort))
-              } catch(e: Throwable) { try { onTick?.invoke("IMAGE-REQ-ERROR id8=" + u.take(8) + " exc=" + e::class.java.simpleName) } catch(_: Throwable) {}; continue }
-              tx++
-              try { imgReqTime[u] = System.currentTimeMillis() } catch(_: Throwable) {}
-              try { imgReqTry[u] = tries + 1 } catch(_: Throwable) {}
-              try { onTick?.invoke("IMAGE-REQ-RETRY id8=" + u.take(8) + " intento=" + (tries + 1) + " seq=" + seq2 + " src=" + src) } catch(_: Throwable) {}
-              n++
-              cupo -= 1
-            }
-          } catch(_: Throwable) {}
-          continue
-        }
-        if (imgReqSent.size >= 768) break
-        try { java.util.UUID.fromString(u) } catch(_: Throwable) { try { onTick?.invoke("IMAGE-REQ-UUID-MALO u=" + u.take(20)) } catch(_: Throwable) {}; continue }
+      if (active >= 2) return false
+
+      var sent = 0
+      for (u in ids) {
+        if (sent >= 2 - active) break
+        try { java.util.UUID.fromString(u) } catch (_: Throwable) { continue }
+        if (ImageAssets.has(u)) continue
+
+        val last = imgReqTime[u] ?: 0L
+        val known = imgReqSent.contains(u)
+        if (known && now - last < 15_000L) continue
+        if (known && ImageAssets.hasPending(u)) continue
+
         val b = UdpCircuit.requestImage(s.agentId, s.sessionId, u)
-        val seq = try { ByteBuffer.wrap(b, 1, 4).order(ByteOrder.BIG_ENDIAN).int.toLong() and 0xFFFFFFFFL } catch(_: Throwable) { UdpCircuit.lastSeq() }
-        try {
-          sk.send(DatagramPacket(b, b.size, ad, s.simPort))
-        } catch(e: Throwable) { try { onTick?.invoke("IMAGE-REQ-ERROR id8=" + u.take(8) + " exc=" + e::class.java.simpleName) } catch(_: Throwable) {}; continue }
+        try { sk.send(DatagramPacket(b, b.size, ad, s.simPort)) } catch (_: Throwable) { continue }
+
         tx++
         imgReqSent.add(u)
-        try { imgReqTime[u] = System.currentTimeMillis() } catch(_: Throwable) {}
-        try { imgReqTry[u] = 1 } catch(_: Throwable) {}
-        try { onTick?.invoke("IMAGE-REQ-SENT id8=" + u.take(8) + " bytes=" + b.size + " priority=100000 seq=" + seq + " src=" + src + " fmt=high8-rel") } catch(_: Throwable) {}
+        imgReqTime[u] = now
+        imgReqTry[u] = (imgReqTry[u] ?: 0) + 1
+        sent++
+
         try {
-          if (!imgCtrlDone) {
-            imgCtrlDone = true
-            try {
-              val bc = UdpCircuit.requestImageLow8(s.agentId, s.sessionId, u)
-              val seqc = try { ByteBuffer.wrap(bc, 1, 4).order(ByteOrder.BIG_ENDIAN).int.toLong() and 0xFFFFFFFFL } catch(_: Throwable) { UdpCircuit.lastSeq() }
-              try { sk.send(DatagramPacket(bc, bc.size, ad, s.simPort)) } catch(_: Throwable) {}
-              tx++
-              try { onTick?.invoke("IMAGE-REQ-SENT id8=" + u.take(8) + " bytes=" + bc.size + " seq=" + seqc + " src=" + src + " fmt=low8-CTRL") } catch(_: Throwable) {}
-            } catch(_: Throwable) {}
-            try {
-              val bt = UdpCircuit.requestImageType1(s.agentId, s.sessionId, u)
-              val seqt = try { ByteBuffer.wrap(bt, 1, 4).order(ByteOrder.BIG_ENDIAN).int.toLong() and 0xFFFFFFFFL } catch(_: Throwable) { UdpCircuit.lastSeq() }
-              try { sk.send(DatagramPacket(bt, bt.size, ad, s.simPort)) } catch(_: Throwable) {}
-              tx++
-              try { onTick?.invoke("IMAGE-REQ-SENT id8=" + u.take(8) + " bytes=" + bt.size + " seq=" + seqt + " src=" + src + " fmt=high8-type1") } catch(_: Throwable) {}
-            } catch(_: Throwable) {}
-          }
-        } catch(_: Throwable) {}
-        try { if (imgHexDone.add(u)) onTick?.invoke(UdpCircuit.txHex("RequestImage", seq, b, 64)) } catch(_: Throwable) {}
-        n++
-        cupo -= 1
+          onTick?.invoke(
+            "IMAGE-UDP-REQ id8=" + u.take(8) +
+              " intento=" + imgReqTry[u] +
+              " active=" + (active + sent) +
+              " seq=" + UdpCircuit.lastSeq() +
+              " src=" + src
+          )
+        } catch (_: Throwable) {}
       }
-      try { if (cupo <= 0) onTick?.invoke("IMAGE-REQ-CUPO total=" + uuids.size + " enviadas-esta-vez=" + n) } catch(_: Throwable) {}
-      n > 0
-    } catch(_: Throwable) { false }
+      sent > 0
+    } catch (_: Throwable) { false }
   }
   /** Re-request specific missing ImagePacket blocks instead of restarting the whole image. */
   fun retryMissingImagePackets(src: String = "missing"): Int {
@@ -750,6 +667,7 @@ object AgentLoop {
     if (s.agentId.isBlank() || s.simIp.isBlank() || s.simPort == 0) return
     running = true
     try { ImageAssets.resetSession() } catch(_: Throwable) {}
+    try { TexFetch.reset() } catch(_: Throwable) {}
     try { imgReqSent.clear() } catch(_: Throwable) {}
     try { rxDescPorId.clear() } catch(_: Throwable) {}
     try { imgReqTime.clear() } catch(_: Throwable) {}
@@ -758,11 +676,7 @@ object AgentLoop {
     try { imgSeen.clear() } catch(_: Throwable) {}
     try { imgNoDb.clear() } catch(_: Throwable) {}
     try { imgHexDone.clear() } catch(_: Throwable) {}
-    try { sintDone = false } catch(_: Throwable) {}
-    try { imgCtrlDone = false } catch(_: Throwable) {}
-    try { sintLine = "TEST-SINT-pendiente" } catch(_: Throwable) {}
     try { destLine = "IMAGE-DEST pendiente" } catch(_: Throwable) {}
-    try { imgUnrelSent.clear() } catch(_: Throwable) {}
     try { loopT0 = System.currentTimeMillis() } catch(_: Throwable) {}
     try { throttleSentN = 0L } catch(_: Throwable) {}
     try { throttleLastMs = 0L } catch(_: Throwable) {}
@@ -901,33 +815,12 @@ object AgentLoop {
             try {
               if (loopSock != null && loopAddr != null) {
                 val nowR = System.currentTimeMillis()
-                val go = try { (TerrainComposition.textureIds() + PrimDecoder.texList(px, py, pz)).distinct().any { lane -> !imgReqSent.contains(lane) || ((imgReqTry[lane] ?: 1) < 3 && !imgLista(lane) && nowR - (imgReqTime[lane] ?: 0L) > 20000L) } } catch(_: Throwable) { false }
-                try { ImageAssets.touchIds((TerrainComposition.textureIds() + PrimDecoder.texList(px, py, pz)).distinct().take(96)) } catch(_: Throwable) {}
-                if (nowR - lastHttpTexKick >= 1000L) {
-                  lastHttpTexKick = nowR
-                  try { TexFetch.requestVisible(PrimDecoder.texList(px, py, pz), 4) } catch(_: Throwable) {}
-                }
-                if (go) sendImageReqBody("tick")
-                try {
-                  if (imgRxCount == 0L && System.currentTimeMillis() - loopT0 > 90000L) {
-                    val cands = try { PrimDecoder.texList(px, py, pz).filter { (imgReqTry[it] ?: 0) >= 3 && !imgUnrelSent.contains(it) } } catch(_: Throwable) { emptyList<String>() }
-                    for (u in cands) {
-                      try { java.util.UUID.fromString(u) } catch(_: Throwable) { continue }
-                      val b = UdpCircuit.requestImageUnrel(s.agentId, s.sessionId, u)
-                      val seq = try { ByteBuffer.wrap(b, 1, 4).order(ByteOrder.BIG_ENDIAN).int.toLong() and 0xFFFFFFFFL } catch(_: Throwable) { UdpCircuit.lastSeq() }
-                      val sk3 = loopSock ?: break
-                      val ad3 = loopAddr ?: break
-                      try {
-                        sk3.send(DatagramPacket(b, b.size, ad3, s.simPort))
-                      } catch(e: Throwable) { try { onTick?.invoke("IMAGE-REQ-ERROR id8=" + u.take(8) + " exc=" + e::class.java.simpleName) } catch(_: Throwable) {}; continue }
-                      tx++
-                      try { imgUnrelSent.add(u) } catch(_: Throwable) {}
-                      try { onTick?.invoke("IMAGE-REQ-SENT id8=" + u.take(8) + " bytes=" + b.size + " priority=100000 seq=" + seq + " src=tick rel=unrel fmt=high8-unrel") } catch(_: Throwable) {}
-                    }
-                  }
-                } catch(_: Throwable) {}
-              }
-            } catch(_: Throwable) {}
+                val textureIds = try {
+                  (TerrainComposition.textureIds() + PrimDecoder.texList(px, py, pz)).distinct()
+                } catch(_: Throwable) { emptyList<String>() }
+                try { TexFetch.requestVisible(textureIds, 24) } catch(_: Throwable) {}
+                try { sendImageReqBody("tick") } catch(_: Throwable) {}
+                try { onTick?.invoke(TexFetch.status()) } catch(_: Throwable) {}
             try { if (lastAuHex.isNotBlank()) onTick?.invoke(lastAuHex) } catch(_: Throwable) {}
             try { onTick?.invoke("PING-ESTADO tx=" + pingTx + " ultimo=" + lastPingId) } catch(_: Throwable) {}
           }
