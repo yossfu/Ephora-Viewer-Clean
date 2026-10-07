@@ -1,3 +1,37 @@
+import java.net.URI
+
+val avatarAssetBase = "https://raw.githubusercontent.com/Kaleaon/Linkpoint/7a5438152bd83e46eef6f2a0b69447118db7e40b/disassembled-apps/second-life-2025.12.1075/extracted-resources/assets/Avatar"
+val avatarAssetNames = listOf(
+    "avatar_head.llm",
+    "avatar_upper_body.llm",
+    "avatar_lower_body.llm",
+    "avatar_eye.llm",
+    "avatar_eyelashes.llm",
+    "avatar_skeleton.xml"
+)
+
+val fetchAvatarAssets = tasks.register("fetchAvatarAssets") {
+    doLast {
+        val outDir = file("src/main/assets/avatar")
+        outDir.mkdirs()
+        for (name in avatarAssetNames) {
+            val out = file("$outDir/$name")
+            if (out.exists() && out.length() > 0L) continue
+            URI("$avatarAssetBase/$name").toURL().openStream().use { input ->
+                out.outputStream().use { output -> input.copyTo(output) }
+            }
+        }
+        file("$outDir/THIRD_PARTY_NOTICE.txt").writeText(
+            "Ephora uses legacy Linden Binary Mesh (.llm) system-avatar resources " +
+            "from the open-source Linkpoint project for viewer functionality.\n"
+        )
+    }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn(fetchAvatarAssets)
+}
+
 plugins { id("com.android.application"); kotlin("android") }
 android { namespace = "com.ephora.sl"; compileSdk = 34; ndkVersion = "27.0.12077973"
 defaultConfig { applicationId = "com.ephora.sl"; minSdk = 29; targetSdk = 34; versionCode = 143; versionName = "7.74-real-sl-rebuild"
