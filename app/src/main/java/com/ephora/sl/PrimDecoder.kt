@@ -942,7 +942,7 @@ object PrimDecoder {
           if (i + extraLen > blk.size) throw IndexOutOfBoundsException("extra")
           val extra = blk.copyOfRange(i, i + extraLen)
           i += extraLen
-          if ((flags and 0x10) != 0) i += 41 // sound UUID + gain + flags + radius
+          if ((flags and 0x10) != 0) i += 25 // UUID16 + gainF32 + flagsU8 + radiusF32
           if ((flags and 0x100) != 0) i = readCstr(blk, i) ?: throw IndexOutOfBoundsException("namevalues")
           if (i + 23 > blk.size) throw IndexOutOfBoundsException("shape23")
           val shape = parseShape23(blk, i) ?: throw IndexOutOfBoundsException("shape")
