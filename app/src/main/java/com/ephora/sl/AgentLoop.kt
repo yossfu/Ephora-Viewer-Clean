@@ -325,7 +325,7 @@ object AgentLoop {
             val last = imgReqTime[u] ?: 0L
             val tries = imgReqTry[u] ?: 1
             if (tries < 3 && !imgLista(u) && System.currentTimeMillis() - last > 20000L) {
-              val b2 = UdpCircuit.requestImage(s.agentId, s.sessionId, u)
+              val b2 = UdpCircuit.requestImagePacket(s.agentId, s.sessionId, u, 0)
               val seq2 = try { ByteBuffer.wrap(b2, 1, 4).order(ByteOrder.BIG_ENDIAN).int.toLong() and 0xFFFFFFFFL } catch(_: Throwable) { UdpCircuit.lastSeq() }
               try {
                 sk.send(DatagramPacket(b2, b2.size, ad, s.simPort))
@@ -379,6 +379,28 @@ object AgentLoop {
       n > 0
     } catch(_: Throwable) { false }
   }
+  /** Re-request specific missing ImagePacket blocks instead of restarting the whole image. */
+  fun retryMissingImagePackets(src: String = "missing"): Int {
+    return try {
+      val s = LoginManager.Session
+      val sk = loopSock ?: return 0
+      val ad = loopAddr ?: return 0
+      if (s.agentId.isBlank() || s.sessionId.isBlank() || s.simPort == 0) return 0
+      val missing = ImageAssets.missingRequests(8, 1200L)
+      var sent = 0
+      for ((u, packet) in missing) {
+        try {
+          val b = UdpCircuit.requestImagePacket(s.agentId, s.sessionId, u, packet)
+          sk.send(DatagramPacket(b, b.size, ad, s.simPort))
+          tx++
+          sent++
+          onTick?.invoke("IMAGE-REQ-MISSING id8=" + u.take(8) + " packet=" + packet + " src=" + src)
+        } catch (_: Throwable) {}
+      }
+      sent
+    } catch (_: Throwable) { 0 }
+  }
+
   fun sendImageReq(): Boolean {
     return try { sendImageReqBody("ui") } catch(_: Throwable) { false }
   }
@@ -868,6 +890,7 @@ object AgentLoop {
             try { onTick?.invoke("RX-BURST-MAX n=" + burstMax) } catch(_: Throwable) {}
             burstMax = 0
           }
+          if (now % 2000L < 25L) { try { retryMissingImagePackets("tick") } catch(_: Throwable) {} }
           if (now - t0 >= 10000) {
             t0 = now
             lastTick = "tick10s tx=" + tx
