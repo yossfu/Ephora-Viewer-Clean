@@ -26,6 +26,11 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   @Volatile private var running = false
   private var view: GLSurfaceView? = null
   private var configuredSurface: GLSurfaceView? = null
+  var joystickView: VirtualJoystickView? = null
+  private var joystickPointerId=-1
+  private var cameraPointerId=-1
+  private var cameraLastX=0f
+  private var cameraLastY=0f
   private var width = 1
   private var height = 1
   private var program = 0
@@ -164,7 +169,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       view = surface
       if (configuredSurface !== surface) {
         surface.setEGLContextClientVersion(2)
-        surface.setEGLConfigChooser(8, 8, 8, 0, 16, 0)
+        surface.setEGLConfigChooser(8, 8, 8, 0, 24, 8)
         surface.preserveEGLContextOnPause = true
         surface.setRenderer(this)
         configuredSurface = surface
@@ -222,31 +227,17 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
 
   private fun onTouch(e: MotionEvent) {
     try {
-      val now = SystemClock.elapsedRealtime()
-      touchCount++
-      lastTouch = now
-      if (e.pointerCount > 1) {
-        val dx = e.getX(0) - e.getX(1)
-        val dy = e.getY(0) - e.getY(1)
-        val span = kotlin.math.sqrt(dx * dx + dy * dy)
-        if (e.actionMasked == MotionEvent.ACTION_POINTER_DOWN) downSpan = span
-        else if (e.actionMasked == MotionEvent.ACTION_MOVE && downSpan > 0f) {
-          orbitDistance = (orbitDistance * (downSpan / span.coerceAtLeast(1f))).coerceIn(3.0, 180.0)
-          downSpan = span
-        }
-      } else when (e.actionMasked) {
-        MotionEvent.ACTION_DOWN -> { downX = e.x; downY = e.y }
-        MotionEvent.ACTION_MOVE -> {
-          val dx = e.x - downX; val dy = e.y - downY
-          orbitYaw -= dx * 0.006
-          orbitPitch = (orbitPitch + dy * 0.004).coerceIn(-1.15, 1.15)
-          downX = e.x; downY = e.y
-        }
-        MotionEvent.ACTION_UP -> if (now - lastTap < 350L) recenter()
-      }
-      if (e.actionMasked == MotionEvent.ACTION_UP) lastTap = now
-    } catch (_: Throwable) {}
+      val action=e.actionMasked; val index=e.actionIndex
+      fun joy(x:Float,y:Float){ val cx=108f; val cy=height.toFloat()-108f; val r=78f; var nx=((x-cx)/r).coerceIn(-1f,1f); var ny=((y-cy)/r).coerceIn(-1f,1f); val l=kotlin.math.sqrt(nx*nx+ny*ny); if(l>1f){nx/=l;ny/=l}; AgentLoop.setJoystick(nx,ny); joystickView?.setState(nx,ny) }
+      when(action){
+        MotionEvent.ACTION_DOWN,MotionEvent.ACTION_POINTER_DOWN->{ val id=e.getPointerId(index); val x=e.getX(index); val y=e.getY(index); if(joystickPointerId<0 && x<width*0.42f && y>height*0.58f){joystickPointerId=id;joy(x,y)} else if(cameraPointerId<0){cameraPointerId=id;cameraLastX=x;cameraLastY=y} }
+        MotionEvent.ACTION_MOVE->for(i in 0 until e.pointerCount){ val id=e.getPointerId(i); val x=e.getX(i); val y=e.getY(i); if(id==joystickPointerId)joy(x,y); if(id==cameraPointerId){orbitYaw-=(x-cameraLastX)*0.005; orbitPitch=(orbitPitch+(y-cameraLastY)*0.003).coerceIn(-0.80,0.95);cameraLastX=x;cameraLastY=y} }
+        MotionEvent.ACTION_POINTER_UP->{ val id=e.getPointerId(index); if(id==joystickPointerId){joystickPointerId=-1;AgentLoop.setJoystick(0f,0f);joystickView?.setState(0f,0f)};if(id==cameraPointerId)cameraPointerId=-1 }
+        MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL->{joystickPointerId=-1;cameraPointerId=-1;AgentLoop.setJoystick(0f,0f);joystickView?.setState(0f,0f)}
+      }; touchCount++;lastTouch=SystemClock.elapsedRealtime()
+    }catch(_:Throwable){}
   }
+
   private var lastTap = 0L
   private fun recenter() {
     targetX = AgentLoop.px - 128.0
@@ -294,7 +285,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   override fun onSurfaceChanged(gl: GL10?, w: Int, h: Int) {
     width = w.coerceAtLeast(1); height = h.coerceAtLeast(1)
     GLES20.glViewport(0, 0, width, height)
-    Matrix.perspectiveM(projection, 0, 54f, width.toFloat() / height.toFloat(), 0.1f, 1800f)
+    Matrix.perspectiveM(projection, 0, 54f, width.toFloat() / height.toFloat(), 0.25f, 512f)
     glSurfaceChanged = true
     lastFase = "GLES-superficie-${width}x$height"
   }
@@ -348,16 +339,14 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       updateTerrain()
       drawTerrain()
       if (DRAW_WATER_SURFACE) drawWater()
-      drawAvatar(p, q, r)
       val n = objects.size.coerceAtMost(MAX_OBJECTS)
-      val minX = eyeX - 220.0; val maxX = eyeX + 220.0
-      val minZ = eyeZ - 220.0; val maxZ = eyeZ + 220.0
+      val renderRadius=512.0; val renderRadius2=renderRadius*renderRadius
       val objMap=HashMap<Long,PrimDecoder.Prim>(objects.size)
       for(o in objects)objMap[o.id]=o
       val visibleMeshIds=ArrayList<String>()
       for(i in 0 until n){
         val o=objects[i]; val pose=poseOf(o,objMap); val x=pose.x-128.0; val z=-(pose.y-128.0)
-        if(o.tipo!=47&&o.meshId.isNotEmpty()&&x in minX..maxX&&z in minZ..maxZ)visibleMeshIds.add(o.meshId)
+        val dx=x-eyeX; val dz=z-eyeZ; if(o.tipo!=47&&o.meshId.isNotEmpty()&&dx*dx+dz*dz<=renderRadius2)visibleMeshIds.add(o.meshId)
       }
       MeshAssets.updateVisibleMeshes(visibleMeshIds)
       frPub = n
@@ -376,7 +365,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
         val o = objects[i]
         val pose=poseOf(o,objMap)
         val x=pose.x-128.0; val y=pose.z; val z=-(pose.y-128.0)
-        if (x < minX || x > maxX || z < minZ || z > maxZ) { try { frCull++ } catch(_: Throwable) {}; continue }
+        val dx=x-eyeX; val dz=z-eyeZ; if (dx*dx+dz*dz > renderRadius2) { try { frCull++ } catch(_: Throwable) {}; continue }
         val sx = o.sx.coerceIn(0.05f, 64f); val sy = o.sy.coerceIn(0.05f, 64f); val sz = o.sz.coerceIn(0.05f, 64f)
         val isAvatar = o.tipo == 47
         val color = when {
@@ -387,13 +376,13 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
           o.mat == 1 -> floatArrayOf(0.57f, 0.62f, 0.66f, 1f)
           else -> floatArrayOf(0.66f, 0.63f, 0.58f, 1f)
         }
-        val isSphere = isAvatar || (o.pathCurve == 0x20 || o.pathCurve == 0x21) && (o.profileCurve and 0x0f) == 0
+        val isSphere = (o.pathCurve == 0x20 || o.pathCurve == 0x21) && (o.profileCurve and 0x0f) == 0
         val isCylinder = !isSphere && o.pathCurve == 0x10 && (o.profileCurve and 0x0f) == 0
         val mesh = if (isSphere) sphere else if (isCylinder) cylinder else cube
         val vertexCount = if (isSphere) SPHERE_VERTS else if (isCylinder) CYLINDER_VERTS else CUBE_VERTS
-        val meshGeometry = if (!isAvatar && o.meshId.isNotEmpty()) MeshAssets.mesh(o.meshId) else null
-        val shaped = if (!isAvatar && o.hasShape) PrimShapes.obtain(PrimShapes.quantize(o.pathCurve, o.profileCurve, o.shPb, o.shPe, o.shPsx, o.shPsy, o.shShx, o.shShy, o.shTw, o.shTwb, o.shRo, o.shTpx, o.shTpy, o.shRev, o.shSk, o.shQb, o.shQe, o.shQh)) else null
-        if (!isAvatar && o.meshId.isNotEmpty()) meshReferences++
+        val meshGeometry = if (o.meshId.isNotEmpty()) MeshAssets.mesh(o.meshId) else null
+        val shaped = if (o.hasShape) PrimShapes.obtain(PrimShapes.quantize(o.pathCurve, o.profileCurve, o.shPb, o.shPe, o.shPsx, o.shPsy, o.shShx, o.shShy, o.shTw, o.shTwb, o.shRo, o.shTpx, o.shTpy, o.shRev, o.shSk, o.shQb, o.shQe, o.shQh)) else null
+        if (o.meshId.isNotEmpty()) meshReferences++
         try { if (!isAvatar && o.hasShape) frShapedTry++ } catch(_: Throwable) {}
         if (isAvatar) frAvatar++
         else if (meshGeometry != null) frMesh++
@@ -610,7 +599,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     GLES20.glDepthMask(true)
     GLES20.glDisable(GLES20.GL_BLEND)
   }
-  private fun drawAvatar(x: Double, y: Double, z: Double) {
+  private fun drawAvatar_DISABLED(x: Double, y: Double, z: Double) {
     drawMesh(sphere, SPHERE_VERTS, x, y + 0.9, z, 0.42f, 0.9f, 0.32f, 0f, floatArrayOf(0.12f, 0.76f, 0.86f, 1f))
   }
 
@@ -732,7 +721,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     private const val DRAW_WATER_SURFACE = false
     private const val TERRAIN_RES = 129
     private const val TERRAIN_STEP = 2
-    private const val MAX_OBJECTS = 2048
+    private const val MAX_OBJECTS = 4096
     private const val NULL_TEXTURE_UUID = "00000000-0000-0000-0000-000000000000"
     private const val VERTEX = """
       attribute vec3 aPosition; attribute vec3 aNormal; attribute vec2 aUv; uniform mat4 uMvp; varying vec3 vNormal; varying vec2 vUv; varying vec3 vTerrainPos; varying vec3 vLocalPos;
