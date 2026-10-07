@@ -113,12 +113,17 @@ class MainActivity : ComponentActivity() {
     val view3d = findViewById<View>(R.id.view3d)
     val surface3d = findViewById<GLSurfaceView>(R.id.surface3d)
     val btn3dExit = findViewById<Button>(R.id.btn3dExit)
+    val joystick3d = findViewById<VirtualJoystickView>(R.id.joystick3d)
+    val btn3dCam = findViewById<Button>(R.id.btn3dCam)
     // Register the renderer while the GLSurfaceView is still hidden. If setRenderer()
     // runs only after revealing this SurfaceView, Android may deliver surfaceCreated
     // before GLSurfaceView has a GLThread to receive it; a later activity resume then
     // appears to "fix" the screen by creating a fresh surface.
     var renderer3d: SlWorldRenderer? = SlWorldRenderer(this@MainActivity)
     try { renderer3d?.prepare(surface3d) } catch(_: Throwable) {}
+    joystick3d.onMove = { x, y -> AgentLoop.setJoystick(x, y) }
+    joystick3d.onRelease = { AgentLoop.setJoystick(0f, 0f) }
+    btn3dCam.setOnClickListener { try { renderer3d?.resetCamera() } catch(_: Throwable) {} }
     val streamDevId = try { StreamBridge.devId(this@MainActivity) } catch(_: Throwable) { "nodev" }
     fun snap(): StreamBridge.Snap? {
       return try {
@@ -143,7 +148,7 @@ class MainActivity : ComponentActivity() {
       try { gfxExitLatch = renderer3d?.gfxLine() ?: "?" } catch(_: Throwable) {}
       try { renderer3d?.stop() } catch(_: Throwable) {}
       try { drawer.setDrawerLockMode(DrawerLayout.LOCK_MODE_UNLOCKED); drawer.setScrimColor(0x99000000.toInt()) } catch(_: Throwable) {}
-      try { view3d.visibility = View.GONE } catch(_: Throwable) {}
+      try { AgentLoop.setJoystick(0f, 0f); view3d.visibility = View.GONE } catch(_: Throwable) {}
       try { if (StreamBridge.streaming) scope.launch(Dispatchers.IO) { try { val s = snap(); if (s != null) StreamBridge.pushHist(streamDevId, s) } catch(_: Throwable) {} } } catch(_: Throwable) {}
     }
     val chatListScroll = findViewById<ScrollView>(R.id.chatListScroll)
@@ -540,7 +545,7 @@ class MainActivity : ComponentActivity() {
       try {
         if (renderer3d?.isAlive() == true) {
       try { drawer.closeDrawers(); drawer.setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED); drawer.setScrimColor(android.graphics.Color.TRANSPARENT) } catch(_: Throwable) {}
-      try { view3d.visibility = View.VISIBLE; view3d.bringToFront() } catch(_: Throwable) {}
+      try { AgentLoop.setJoystick(0f, 0f); view3d.visibility = View.VISIBLE; view3d.bringToFront() } catch(_: Throwable) {}
           udpLog("3D-YA-ABIERTO loop-unico")
           return@setOnClickListener
         }
@@ -561,7 +566,7 @@ class MainActivity : ComponentActivity() {
         mundo.visibility = View.GONE
         for (v in listOf(chatListScroll, convBar, chatScroll, inputRow)) { visStash.add(Pair(v, v.visibility)); v.visibility = View.GONE }
       } catch(_: Throwable) {}
-      try { view3d.visibility = View.VISIBLE; view3d.bringToFront() } catch(_: Throwable) {}
+      try { AgentLoop.setJoystick(0f, 0f); view3d.visibility = View.VISIBLE; view3d.bringToFront() } catch(_: Throwable) {}
       var supTries = 0
       var forceW = 0
       var forceH = 0
@@ -596,6 +601,7 @@ class MainActivity : ComponentActivity() {
           val r = renderer3d ?: SlWorldRenderer(this@MainActivity)
           r3d = r
           r.onStats = { line -> try { udpLog(line) } catch(_: Throwable) {} }
+          AgentLoop.setJoystick(0f, 0f)
           view3d.visibility = View.VISIBLE
           if (forceW > 1 && forceH > 1) { try { r.applyMetrics(forceW, forceH) } catch(_: Throwable) {} }
           if (!r.start(surface3d, forceW, forceH)) throw RuntimeException("3d-init")
