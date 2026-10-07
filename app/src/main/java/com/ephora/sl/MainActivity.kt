@@ -121,8 +121,7 @@ class MainActivity : ComponentActivity() {
     // appears to "fix" the screen by creating a fresh surface.
     var renderer3d: SlWorldRenderer? = SlWorldRenderer(this@MainActivity)
     try { renderer3d?.prepare(surface3d) } catch(_: Throwable) {}
-    joystick3d.onMove = { x, y -> AgentLoop.setJoystick(x, y) }
-    joystick3d.onRelease = { AgentLoop.setJoystick(0f, 0f) }
+    renderer3d?.joystickView = joystick3d
     btn3dCam.setOnClickListener { try { renderer3d?.resetCamera() } catch(_: Throwable) {} }
     val streamDevId = try { StreamBridge.devId(this@MainActivity) } catch(_: Throwable) { "nodev" }
     fun snap(): StreamBridge.Snap? {
