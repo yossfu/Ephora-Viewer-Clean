@@ -12,6 +12,11 @@ object AgentLoop {
   var lastTick = ""
   var onTick: ((String) -> Unit)? = null
   @Volatile var controlFlags = 0
+  @Volatile var joystickX = 0f
+  @Volatile var joystickY = 0f
+  @Volatile var cameraYaw = 0f
+  fun setJoystick(x:Float,y:Float){ joystickX=x.coerceIn(-1f,1f); joystickY=y.coerceIn(-1f,1f) }
+  private fun joystickFlags():Int { val x=joystickX; val y=joystickY; var f=0; if(y < -0.18f)f=f or 1; if(y > 0.18f)f=f or 2; if(x > 0.18f)f=f or 8; if(x < -0.18f)f=f or 4; if(kotlin.math.abs(y)>0.82f)f=f or 0x400; if(kotlin.math.abs(x)>0.82f)f=f or 0x800; return f }
   var px = 128.0
   var py = 128.0
   var pz = 25.0
@@ -532,6 +537,7 @@ object AgentLoop {
         } catch(_: Throwable) {}
       }
       val mid = rx.msgId
+      if (mid == 158) { try { UdpCircuit.decode(buf, len)?.payload?.let { AvatarAppearanceStore.accept(it)?.let { line -> onTick?.invoke(line) } } } catch(_:Throwable) {} }
       if (mid == 0xFFFF0094.toInt()) {
         try {
           val d = UdpCircuit.decode(buf, len)
@@ -677,6 +683,7 @@ object AgentLoop {
     if (s.agentId.isBlank() || s.simIp.isBlank() || s.simPort == 0) return
     running = true
     try { ImageAssets.resetSession() } catch(_: Throwable) {}
+    try { AvatarAppearanceStore.clear() } catch(_: Throwable) {}
     try { TexFetch.reset() } catch(_: Throwable) {}
     try { imgReqSent.clear() } catch(_: Throwable) {}
     try { rxDescPorId.clear() } catch(_: Throwable) {}
@@ -715,12 +722,12 @@ object AgentLoop {
           val now = System.currentTimeMillis()
           val dt = ((now - last).coerceIn(1L, 500L)) / 1000.0
           last = now
-          val f = controlFlags
+          val f = joystickFlags() or controlFlags
           if (now - lastAuSend >= 100L) {
             lastAuSend = now
           try {
             val cv = camVec
-            val b = UdpCircuit.agentUpdate(s.agentId, s.sessionId, f, cv[0], cv[1], cv[2], 256f, cv[3], cv[4], cv[5], cv[6], cv[7], cv[8], cv[9], cv[10], cv[11])
+            val b = UdpCircuit.agentUpdate(s.agentId, s.sessionId, f, cv[0], cv[1], cv[2], 512f, cameraYaw, cameraYaw, cv[3], cv[4], cv[5], cv[6], cv[7], cv[8], cv[9], cv[10], cv[11])
             sock.send(DatagramPacket(b, b.size, addr, s.simPort))
             tx++
             val hx = UdpCircuit.txHex("AgentUpdate", UdpCircuit.lastSeq(), b)
@@ -730,11 +737,8 @@ object AgentLoop {
           }
           if (f != 0) {
             if (!movOn) { movOn = true; movFlags = f; sx = px; sy = py; sz = pz }
-            val v = 3.2 * dt
-            if ((f and 1) != 0) px += v
-            if ((f and 2) != 0) px -= v
-            if ((f and 4) != 0) py -= v
-            if ((f and 8) != 0) py += v
+            val mag = kotlin.math.sqrt((joystickX*joystickX + joystickY*joystickY).toDouble()).coerceAtMost(1.0)
+            if(mag>0.05){ val speed=3.2*(if(mag>0.82)1.35 else 1.0)*dt; val forward=-joystickY.toDouble(); val strafe=joystickX.toDouble(); val cy=kotlin.math.cos(cameraYaw.toDouble()); val sy=kotlin.math.sin(cameraYaw.toDouble()); px += (cy*forward + (-sy)*strafe)*speed; py += (sy*forward + cy*strafe)*speed }
           } else if (movOn) {
             movOn = false
             try { onTick?.invoke("MOV flags=" + movFlags + " pos=" + "%.1f,%.1f,%.1f".format(sx, sy, sz) + "->" + posStr() + " coarse=" + (if (coarseSeen) "si" else "no")) } catch(_: Throwable) {}
