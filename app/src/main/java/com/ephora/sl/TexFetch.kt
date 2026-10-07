@@ -196,7 +196,8 @@ object TexFetch {
                 lastError = "bad-body=" + body.size
               } else {
                 httpOk++
-                if (ImageAssets.acceptHttpJ2c(request.uuid, body)) {
+                val contentType = response.header("Content-Type") ?: "application/octet-stream"
+                if (ImageAssets.acceptHttpTexture(request.uuid, contentType, body)) {
                   decodeAccepted++
                   done = true
                   try {
