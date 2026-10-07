@@ -42,6 +42,7 @@ object PrimDecoder {
   private val answeredIds = LinkedHashSet<Long>()
   private val evictSample = ArrayDeque<String>()
   private val killSample = ArrayDeque<String>()
+  private val deadIds = LinkedHashSet<Long>()
   private val pubPrev = LinkedHashSet<Long>()
   @Volatile var pubDiffLatch = "sin-pub-aun"
   @Volatile var advReqLatch = "sin-req-aun"
@@ -79,12 +80,14 @@ object PrimDecoder {
     val now = System.currentTimeMillis()
     try { if (now - lastAdvReq < 15000L) return } catch(_: Throwable) { return }
     try { lastAdvReq = now } catch(_: Throwable) {}
-    var ids: List<Long> = emptyList()
-    try { ids = reqMultDone.filter { !answeredIds.contains(it) } } catch(_: Throwable) {}
-    try { ids = ids.sortedBy { distPend(it, pubAx, pubAy, pubAz) }.take(8) } catch(_: Throwable) {}
+    var mundo: List<Long> = emptyList()
+    try { mundo = reqMultDone.filter { !answeredIds.contains(it) && synchronized(recs) { recs.containsKey(it) } } } catch(_: Throwable) {}
+    var muertos = 0
+    try { muertos = reqMultDone.count { !answeredIds.contains(it) && !synchronized(recs) { recs.containsKey(it) } } } catch(_: Throwable) {}
+    try { mundo = mundo.sortedBy { distPend(it, pubAx, pubAy, pubAz) }.take(8) } catch(_: Throwable) {}
     var mu = ""
-    try { mu = ids.joinToString(" ") { id -> id.toString() + ":" + Math.sqrt(distPend(id, pubAx, pubAy, pubAz)).toInt().toString() + "m:" + ((now - (try { reqMultTime[id] ?: now } catch(_: Throwable) { now })) / 1000L).toString() + "s" } } catch(_: Throwable) {}
-    try { advReqLatch = "ADV-REQ pedidas=" + nReqMultSent + " contestadas=" + nAnsweredReq + " sinResp=" + (reqMultDone.size - answeredIds.size) + " muestra=[" + mu + "]" } catch(_:Throwable) {}
+    try { mu = mundo.joinToString(" ") { id -> id.toString() + ":" + Math.sqrt(distPend(id, pubAx, pubAy, pubAz)).toInt().toString() + "m:" + ((now - (try { reqMultTime[id] ?: now } catch(_: Throwable) { now })) / 1000L).toString() + "s" } } catch(_: Throwable) {}
+    try { advReqLatch = "ADV-REQ pedidas=" + nReqMultSent + " contestadas=" + nAnsweredReq + " mundoSinResp=" + mundo.size + " muertos=" + muertos + " muestra=[" + mu + "]" } catch(_:Throwable) {}
   }
   fun advSceneLine(): String {
     var tot = 0
@@ -526,12 +529,14 @@ object PrimDecoder {
       if (x > -10.0 && x < 10.0 && y > -10.0 && y < 10.0 && z > -200.0 && z < 2000.0) {
         try { nAttach++ } catch(_: Throwable) {}
         try { censoAdd(censoAttach, id) } catch(_: Throwable) {}
+        try { synchronized(recs) { if (deadIds.size < 20000) deadIds.add(id) } } catch(_: Throwable) {}
         try { lastPutReject = "attach id=" + id } catch(_: Throwable) {}
         try { if (attachArmed && attachMuestra == null) { attachMuestra = "ATTACH-MUESTRA id=" + id + " xyz=" + x + "," + y + "," + z + " t=" + tipo; attachArmed = false } } catch(_: Throwable) {}
         return
       }
       if (x < 0.0 || x > 256.0 || y < 0.0 || y > 256.0 || z < -200.0 || z > 2000.0) {
         try { nFueraRango++ } catch(_: Throwable) {}
+        try { synchronized(recs) { if (deadIds.size < 20000) deadIds.add(id) } } catch(_: Throwable) {}
         try { lastPutReject = "fuera id=" + id + " xyz=" + x + "," + y + "," + z } catch(_: Throwable) {}
         try { if (fueraMuestra.isEmpty()) fueraMuestra = "id=" + id + " xyz=" + x + "," + y + "," + z + " t=" + tipo } catch(_: Throwable) {}
         return
@@ -560,6 +565,7 @@ object PrimDecoder {
           r.seen = now
         }
       }
+      try { synchronized(recs) { deadIds.remove(id) } } catch(_: Throwable) {}
       try { lastPutReject = "" } catch(_: Throwable) {}
     } catch(_: Throwable) {}
   }
@@ -1012,6 +1018,7 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
         val sorted = reqMultPend.toList().sortedBy { id -> distPend(id, ax, ay, az) }
         for (id in sorted) {
           if (out.size >= max) break
+          try { if (deadIds.contains(id)) { reqMultPend.remove(id); continue } } catch(_: Throwable) {}
           if (reqMultPend.remove(id)) {
             reqMultDone.add(id)
             try { reqMultTime[id] = nowD } catch(_: Throwable) {}
@@ -1046,7 +1053,7 @@ if (cx > tr.x - 1.0 && cx < tr.x + 1.0 && cy > tr.y - 1.0 && cy < tr.y + 1.0 && 
           val id = ByteBuffer.wrap(p, 11 + i * 12, 4).order(ByteOrder.LITTLE_ENDIAN).int.toLong() and 0xFFFFFFFFL
           synchronized(recs) {
             censoAdd(censoCached, id)
-            if (!recs.containsKey(id) && !reqMultDone.contains(id) && reqMultPend.size < 20000) reqMultPend.add(id)
+            if (!recs.containsKey(id) && !reqMultDone.contains(id) && !deadIds.contains(id) && reqMultPend.size < 20000) reqMultPend.add(id)
           }
         } catch (_: Throwable) {}
         i += 1

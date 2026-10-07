@@ -110,8 +110,8 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     try { if (u.isEmpty()) return false } catch(_: Throwable) { return false }
     try { return glTextures.containsKey(u.lowercase()) } catch(_: Throwable) { return false }
   }
-  private fun nextId(s: String, id: Long): String {
-    return s + (if (s.isEmpty()) "" else " ") + id.toString()
+  private fun sid(s: String, o: PrimDecoder.Prim): String {
+    return s + (if (s.isEmpty()) "" else " ") + o.id.toString() + ":" + "%.0f,%.0f,%.0f".format(o.x, o.y, o.z)
   }
   private fun updateFrDiff(objects: List<PrimDecoder.Prim>) {
     val ids = LinkedHashSet<Long>()
@@ -368,10 +368,10 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
         else if (meshGeometry != null) frMesh++
         else if (shaped != null) frShaped++
         else if (texHit(o)) frTex++ else frBeige++
-        try { if (!isAvatar && meshGeometry != null && frMesh <= 3) sMeshIds = nextId(sMeshIds, o.id) } catch(_: Throwable) {}
-        try { if (!isAvatar && meshGeometry == null && shaped != null && frShaped <= 3) sShapedIds = nextId(sShapedIds, o.id) } catch(_: Throwable) {}
-        try { if (!isAvatar && meshGeometry == null && shaped == null && texHit(o) && frTex <= 3) sTexIds = nextId(sTexIds, o.id) } catch(_: Throwable) {}
-        try { if (!isAvatar && meshGeometry == null && shaped == null && !texHit(o) && frBeige <= 3) sBeigeIds = nextId(sBeigeIds, o.id) } catch(_: Throwable) {}
+        try { if (!isAvatar && meshGeometry != null && frMesh <= 3) sMeshIds = sid(sMeshIds, o) } catch(_: Throwable) {}
+        try { if (!isAvatar && meshGeometry == null && shaped != null && frShaped <= 3) sShapedIds = sid(sShapedIds, o) } catch(_: Throwable) {}
+        try { if (!isAvatar && meshGeometry == null && shaped == null && texHit(o) && frTex <= 3) sTexIds = sid(sTexIds, o) } catch(_: Throwable) {}
+        try { if (!isAvatar && meshGeometry == null && shaped == null && !texHit(o) && frBeige <= 3) sBeigeIds = sid(sBeigeIds, o) } catch(_: Throwable) {}
         if (meshGeometry != null) {
           meshObjects++
           for ((faceIndex, face) in meshGeometry.faces.withIndex()) {
