@@ -201,7 +201,7 @@ object ImageAssets {
 
     if (bitmap == null) {
       // Last chance for capability implementations that omit/mislabel Content-Type.
-      return if (!looksJ2k) decodeToBitmapSync(key, data) else false
+      return if (!looksJ2k) (decodeToBitmapSync(key, data) != null) else false
     }
 
     synchronized(this) {
