@@ -48,6 +48,14 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
   private var sphere: FloatBuffer? = null
   private var cylinder: FloatBuffer? = null
   private var waterPlane: FloatBuffer? = null
+  private var avatarUpper: FloatBuffer? = null
+  private var avatarLower: FloatBuffer? = null
+  private var avatarHead: FloatBuffer? = null
+  private var avatarUpperVerts = 0
+  private var avatarLowerVerts = 0
+  private var avatarHeadVerts = 0
+  private var avatarAssetsLoaded = false
+  private var avatarAssetState = "-"
   private var terrain: FloatBuffer? = null
   private var terrainIndices: ShortBuffer? = null
   private var terrainCount = 0
@@ -348,6 +356,8 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
       updateTerrain()
       drawTerrain()
       if (DRAW_WATER_SURFACE) drawWater()
+      val avatarObject = nearestAvatar(objects)
+      if (avatarObject != null) drawRealAvatar(avatarObject)
       val n = objects.size.coerceAtMost(MAX_OBJECTS)
       val renderRadius = 512.0
       val renderRadius2 = renderRadius * renderRadius
@@ -557,6 +567,67 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     return id
   }
 
+  private fun loadAvatarAssets() {
+    if (avatarAssetsLoaded) return
+    avatarAssetsLoaded = true
+    try {
+      fun make(asset: String): Pair<FloatBuffer?, Int> {
+        val mesh = LegacyAvatarMesh.load(ctx, asset) ?: return Pair(null, 0)
+        val data = LegacyAvatarMesh.expand(mesh)
+        val fb = ByteBuffer.allocateDirect(data.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+        fb.put(data)
+        fb.position(0)
+        return Pair(fb, data.size / 8)
+      }
+      val up = make("avatar_upper_body.llm")
+      val lo = make("avatar_lower_body.llm")
+      val he = make("avatar_head.llm")
+      avatarUpper = up.first; avatarUpperVerts = up.second
+      avatarLower = lo.first; avatarLowerVerts = lo.second
+      avatarHead = he.first; avatarHeadVerts = he.second
+      avatarAssetState = "head=" + avatarHeadVerts + " upper=" + avatarUpperVerts + " lower=" + avatarLowerVerts
+    } catch (e: Throwable) {
+      avatarAssetState = "error=" + e.javaClass.simpleName
+    }
+  }
+
+  private fun nearestAvatar(objects: List<PrimDecoder.Prim>): PrimDecoder.Prim? {
+    var best: PrimDecoder.Prim? = null
+    var bestD = Double.MAX_VALUE
+    for (o in objects) {
+      if (o.tipo != 47) continue
+      val dx = o.x - AgentLoop.px
+      val dy = o.y - AgentLoop.py
+      val dz = o.z - AgentLoop.pz
+      val d = dx * dx + dy * dy + dz * dz
+      if (d < bestD) { bestD = d; best = o }
+    }
+    return best
+  }
+
+  private fun drawRealAvatar(av: PrimDecoder.Prim) {
+    loadAvatarAssets()
+    val x = av.x - 128.0
+    val y = av.z
+    val z = -(av.y - 128.0)
+    val neutral = floatArrayOf(1f, 1f, 1f, 1f)
+    val upperTex = AvatarAppearanceState.texture(AvatarAppearanceState.TEX_UPPER_BAKED)
+    val lowerTex = AvatarAppearanceState.texture(AvatarAppearanceState.TEX_LOWER_BAKED)
+    val headTex = AvatarAppearanceState.texture(AvatarAppearanceState.TEX_HEAD_BAKED)
+    if (avatarUpper != null && avatarUpperVerts > 0) {
+      drawMesh(avatarUpper, avatarUpperVerts, x, y, z, 1f, 1f, 1f, av.yaw, neutral, upperTex, 1f, 1f, 0f, 0f, 0f, 0, 0, av.rotX, av.rotY, av.rotZ, av.rotW)
+      frAvatar++
+    }
+    if (avatarLower != null && avatarLowerVerts > 0) {
+      drawMesh(avatarLower, avatarLowerVerts, x, y, z, 1f, 1f, 1f, av.yaw, neutral, lowerTex, 1f, 1f, 0f, 0f, 0f, 0, 0, av.rotX, av.rotY, av.rotZ, av.rotW)
+      frAvatar++
+    }
+    if (avatarHead != null && avatarHeadVerts > 0) {
+      drawMesh(avatarHead, avatarHeadVerts, x, y, z, 1f, 1f, 1f, av.yaw, neutral, headTex, 1f, 1f, 0f, 0f, 0f, 0, 0, av.rotX, av.rotY, av.rotZ, av.rotW)
+      frAvatar++
+    }
+  }
+
   private fun drawTerrain() {
     val b = terrain ?: return
     val ib = terrainIndices ?: return
@@ -714,7 +785,7 @@ class SlWorldRenderer(private val ctx: Context) : GLSurfaceView.Renderer {
     GLES20.glAttachShader(p,v); GLES20.glAttachShader(p,f); GLES20.glLinkProgram(p); val ok = IntArray(1); GLES20.glGetProgramiv(p,GLES20.GL_LINK_STATUS,ok,0); if (ok[0] == 0) throw IllegalStateException(GLES20.glGetProgramInfoLog(p)); GLES20.glDeleteShader(v); GLES20.glDeleteShader(f); return p
   }
   fun gfxLine(): String = "GFX-DIAG backend=GLES fps=$fps firstFrameMs=$firstFrameLatencyMs surfaceCreated=" + (if (glSurfaceCreated) "si" else "no") + " surfaceChanged=" + (if (glSurfaceChanged) "si" else "no") + " holderValid=" + (if (try { view?.holder?.surface?.isValid == true } catch (_: Throwable) { false }) "si" else "no") + " shown=" + (if (try { view?.isShown == true } catch (_: Throwable) { false }) "si" else "no") + " obj=$sceneObjects meshRef=$meshReferences meshReady=$meshObjects tex=" + texturedObjects + " terrainTex=" + (if (terrainTextureUuid.isNotEmpty()) terrainTextureUuid.take(8) else "-") + " terrainGpu=$terrainGpuTextures terrainBmp=$terrainBitmapHits/$terrainBitmapMisses" + " cacheGPU=" + glTextures.size + " draws=$drawCount terrain=" + TerrainMesh.patchesGot() + "/256 water=" + (if (DRAW_WATER_SURFACE) "on" else "off") + " frameAgeMs=" + frameAgeMs() + " startOk=" + (if (startOk) "si" else "no") + " fase=$lastFase initErr=" + (initError ?: "-") + " eye=" + "%.1f,%.1f,%.1f".format(targetX + cos(orbitYaw)*orbitDistance, targetY + sin(orbitPitch)*orbitDistance, targetZ + sin(orbitYaw)*orbitDistance) + " target=" + "%.1f,%.1f,%.1f".format(targetX,targetY,targetZ) + " " + TerrainComposition.status() + " " + ImageAssets.status() + " " + TexFetch.status() + " " + MeshAssets.status() + " " + PrimShapes.status()
-  fun sunState(): String = "WORLD-SCENE backend=GLES mesh=procedural terrainPatches=" + TerrainMesh.patchesGot()
+  fun sunState(): String = "WORLD-SCENE backend=GLES mesh=real-sl avatarMesh=" + avatarAssetState + " terrainPatches=" + TerrainMesh.patchesGot()
   fun projectLabel(fx: Double, fy: Double, fz: Double): Pair<Float,Float>? = null
   fun frameAgeMs(): Long = if (lastFrame > 0L) (SystemClock.elapsedRealtime() - lastFrame).coerceAtLeast(0L) else -1L
   fun touchAgeMs(): Long = if (lastTouch > 0L) (SystemClock.elapsedRealtime() - lastTouch).coerceAtLeast(0L) else -1L
