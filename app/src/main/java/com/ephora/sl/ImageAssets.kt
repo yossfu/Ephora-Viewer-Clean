@@ -111,6 +111,18 @@ object ImageAssets {
     return if (completed != null) "TEX-UDP-ENSAMBLADA id=${uuid.take(8)} bytes=${completed!!.size} codec=$codec" else null
   }
 
+  /** Accept a complete GetTexture HTTP response (JPEG2000/J2C) using the same decoder/cache as UDP. */
+  fun acceptHttpJ2c(uuid: String, data: ByteArray): Boolean {
+    val key = uuid.lowercase()
+    if (data.isEmpty() || data.size > MAX_COMPRESSED) return false
+    synchronized(this) {
+      if (bitmaps.containsKey(key)) return true
+      if (decoding.contains(key)) return false
+    }
+    decode(key, J2C_IMAGE_CODEC, data)
+    return true
+  }
+
   private fun decode(uuid: String, codec: Int, compressed: ByteArray) {
     synchronized(this) { if (!decoding.add(uuid)) return }
     scope.launch {
