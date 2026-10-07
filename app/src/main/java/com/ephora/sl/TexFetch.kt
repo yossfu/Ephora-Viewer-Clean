@@ -5,7 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -131,7 +131,7 @@ object TexFetch {
   }
 
   private suspend fun workerLoop() {
-    while (isActive) {
+    while (currentCoroutineContext().isActive) {
       val request = try { queue.take() } catch (_: InterruptedException) { continue }
       queued.remove(request.uuid)
       if (ImageAssets.has(request.uuid) || notFound.contains(request.uuid)) continue

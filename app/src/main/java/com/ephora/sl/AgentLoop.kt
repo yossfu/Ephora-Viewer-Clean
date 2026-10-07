@@ -245,7 +245,16 @@ object AgentLoop {
   }
   val imgHexDone = LinkedHashSet<String>()
   var loopT0 = 0L
-  @Volatile var sintLine = "synthetic-tests-removed"
+  var sintDone = false
+  @Volatile var sintLine = "synthetic-tests-disabled"
+  @Volatile var destLine = "IMAGE-DEST pendiente"
+  fun sintTestOnce() {
+    try {
+      if (sintDone) return
+      sintDone = true
+      sintLine = "synthetic-tests-disabled"
+    } catch (_: Throwable) {}
+  }
   fun sendImageReqBody(src: String = "tick"): Boolean {
     return try {
       val s = LoginManager.Session
@@ -303,7 +312,7 @@ object AgentLoop {
       val sk = loopSock ?: return 0
       val ad = loopAddr ?: return 0
       if (s.agentId.isBlank() || s.sessionId.isBlank() || s.simPort == 0) return 0
-      val missing = ImageAssets.missingRequests(8, 1200L)
+      val missing = ImageAssets.missingRequests(2)
       var sent = 0
       for ((u, packet) in missing) {
         try {
@@ -814,13 +823,15 @@ object AgentLoop {
             try { if (imgRxCount > 0 || rxDescartados > 0) onTick?.invoke("IMAGE-RX-N n=" + imgRxCount + " RX-DESCARTADOS n=" + rxDescartados) } catch(_: Throwable) {}
             try {
               if (loopSock != null && loopAddr != null) {
-                val nowR = System.currentTimeMillis()
                 val textureIds = try {
                   (TerrainComposition.textureIds() + PrimDecoder.texList(px, py, pz)).distinct()
                 } catch(_: Throwable) { emptyList<String>() }
+
                 try { TexFetch.requestVisible(textureIds, 24) } catch(_: Throwable) {}
                 try { sendImageReqBody("tick") } catch(_: Throwable) {}
                 try { onTick?.invoke(TexFetch.status()) } catch(_: Throwable) {}
+              }
+            } catch(_: Throwable) {}
             try { if (lastAuHex.isNotBlank()) onTick?.invoke(lastAuHex) } catch(_: Throwable) {}
             try { onTick?.invoke("PING-ESTADO tx=" + pingTx + " ultimo=" + lastPingId) } catch(_: Throwable) {}
           }
