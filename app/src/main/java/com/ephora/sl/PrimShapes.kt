@@ -33,6 +33,9 @@ object PrimShapes {
   @Volatile var nFailPath = 0L
   @Volatile var nFailRango = 0L
   @Volatile var nFailGeo = 0L
+  fun faceRangeCount(k: Params): Int {
+    return try { obtain(k)?.faceRanges?.size ?: 0 } catch (_: Throwable) { 0 }
+  }
   fun status(): String {
     return "SHAPES built=" + nBuilt + " try=" + nTry + " hits=" + nCacheHit + " cached=" + cache.size + " fPath=" + nFailPath + " fRango=" + nFailRango + " fGeo=" + nFailGeo
   }
@@ -343,7 +346,6 @@ object PrimShapes {
     while (i < outer.size) {
       val j = (i + 1) % outer.size
       if (outerOpen && j == 0) break
-      s.beginFace(if (outerFaceCount == 1) 1 else (i % outerFaceCount) + 1)
       s.beginFace(if (outerFaceCount == 1) 1 else (i % outerFaceCount) + 1)
       var si2 = 0
       while (si2 < steps) {
